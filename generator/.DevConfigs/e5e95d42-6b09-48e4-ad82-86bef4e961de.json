@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations when the default credential chain returns cached credentials, by skipping the resolution timeout and nested async calls that are only needed when credentials have to be resolved."
+    ]
+  }
+}
