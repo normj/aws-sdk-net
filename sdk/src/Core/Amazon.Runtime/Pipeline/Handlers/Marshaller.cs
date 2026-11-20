@@ -191,8 +191,10 @@ namespace Amazon.Runtime.Internal
         private const string InitCollectionsOnComponent = "cfg/init-coll#1";
         private const string InitCollectionsOffComponent = "cfg/init-coll#0";
 
-        // Shared cache for client configs that are not a ClientConfig and so have no cache fields of their own.
-        private static SanitizedUserAgentComponent _sharedComponentCache;
+        // Shared caches for client configs that are not a ClientConfig and so have no cache fields of their own.
+        // One per component, because a cached entry is matched on its source value only, not on its prefix.
+        private static SanitizedUserAgentComponent _sharedUserAgentComponentCache;
+        private static SanitizedUserAgentComponent _sharedClientAppIdComponentCache;
 
         /// <summary>
         /// Returns <paramref name="prefix"/> followed by <paramref name="value"/> with the characters a User-Agent
@@ -231,12 +233,12 @@ namespace Amazon.Runtime.Internal
             var cacheOwner = clientConfig as ClientConfig;
 
             requestContext.UserAgentDetails.AddUserAgentComponent(
-                GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedUserAgentComponent : ref _sharedComponentCache, prefix: null, clientConfig.UserAgent));
+                GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedUserAgentComponent : ref _sharedUserAgentComponentCache, prefix: null, clientConfig.UserAgent));
 
             var clientAppId = clientConfig.ClientAppId;
             if (!string.IsNullOrEmpty(clientAppId))
                 requestContext.UserAgentDetails.AddUserAgentComponent(
-                    GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedClientAppIdComponent : ref _sharedComponentCache, ClientAppIdPrefix, clientAppId));
+                    GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedClientAppIdComponent : ref _sharedClientAppIdComponentCache, ClientAppIdPrefix, clientAppId));
 
             requestContext.UserAgentDetails.AddUserAgentComponent(requestContext.IsAsync ? ClientAsyncComponent : ClientSyncComponent);
 

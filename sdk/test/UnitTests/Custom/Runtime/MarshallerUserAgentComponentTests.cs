@@ -143,6 +143,30 @@ namespace AWSSDK.UnitTests
             Assert.AreEqual(ExpectedComponents("mock(ua)/2.0", "mock app", true, AWSConfigs.InitializeCollections), RunPreInvoke(mock.Object, true));
         }
 
+        [TestMethod]
+        public void ClientConfigThatIsNotAClientConfigSubclassKeepsAppIdPrefixWhenAppIdEqualsUserAgent()
+        {
+            var mock = new Mock<IClientConfig>();
+            mock.SetupGet(c => c.TelemetryProvider).Returns(AWSConfigs.TelemetryProvider);
+            mock.SetupGet(c => c.ResponseChecksumValidation).Returns(ResponseChecksumValidation.WHEN_SUPPORTED);
+            mock.SetupGet(c => c.UserAgent).Returns("same(value)");
+            mock.SetupGet(c => c.ClientAppId).Returns("same(value)");
+
+            for (int i = 0; i < 2; i++)
+            {
+                Assert.AreEqual(ExpectedComponents("same(value)", "same(value)", true, AWSConfigs.InitializeCollections), RunPreInvoke(mock.Object, true));
+            }
+
+            // One non-ClientConfig config's app id must not be served as another's User-Agent.
+            var other = new Mock<IClientConfig>();
+            other.SetupGet(c => c.TelemetryProvider).Returns(AWSConfigs.TelemetryProvider);
+            other.SetupGet(c => c.ResponseChecksumValidation).Returns(ResponseChecksumValidation.WHEN_SUPPORTED);
+            other.SetupGet(c => c.UserAgent).Returns("foo");
+            mock.SetupGet(c => c.ClientAppId).Returns("foo");
+            Assert.AreEqual(ExpectedComponents("same(value)", "foo", true, AWSConfigs.InitializeCollections), RunPreInvoke(mock.Object, true));
+            Assert.AreEqual(ExpectedComponents("foo", null, true, AWSConfigs.InitializeCollections), RunPreInvoke(other.Object, true));
+        }
+
         /// <summary>
         /// The components string as the handler built it before caching was added.
         /// </summary>
