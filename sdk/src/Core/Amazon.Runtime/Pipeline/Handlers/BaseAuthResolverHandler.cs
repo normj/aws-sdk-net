@@ -21,6 +21,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 
 namespace Amazon.Runtime.Internal
@@ -41,9 +42,32 @@ namespace Amazon.Runtime.Internal
             base.InvokeSync(executionContext);
         }
 
-        public override async Task<T> InvokeAsync<T>(IExecutionContext executionContext)
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The exception is not swallowed: it is rethrown through the returned task, as an async method would.")]
+        public override Task<T> InvokeAsync<T>(IExecutionContext executionContext)
         {
-            await PreInvokeAsync(executionContext).ConfigureAwait(false);
+            var preInvoke = PreInvokeAsync(executionContext);
+
+            // Identity resolution usually completes synchronously (cached or static identities). Then the
+            // inner handlers' task is returned directly instead of being awaited in an async state machine.
+            if (preInvoke.Status == TaskStatus.RanToCompletion)
+            {
+                try
+                {
+                    return base.InvokeAsync<T>(executionContext);
+                }
+                catch (Exception exception)
+                {
+                    return RethrowAsync<T>(ExceptionDispatchInfo.Capture(exception));
+                }
+            }
+
+            return InvokeAfterPreInvokeAsync<T>(preInvoke, executionContext);
+        }
+
+        private async Task<T> InvokeAfterPreInvokeAsync<T>(Task preInvoke, IExecutionContext executionContext)
+            where T : AmazonWebServiceResponse, new()
+        {
+            await preInvoke.ConfigureAwait(false);
             return await base.InvokeAsync<T>(executionContext).ConfigureAwait(false);
         }
 

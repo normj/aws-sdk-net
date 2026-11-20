@@ -14,6 +14,7 @@
  */
 
 using System;
+using System.Runtime.ExceptionServices;
 
 namespace Amazon.Runtime.Internal
 {
@@ -54,7 +55,29 @@ namespace Amazon.Runtime.Internal
         /// <param name="executionContext">The execution context, it contains the
         /// request and response context.</param>
         /// <returns>A task that represents the asynchronous operation.</returns>
-        public override async System.Threading.Tasks.Task<T> InvokeAsync<T>(IExecutionContext executionContext)
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The exception is not swallowed: it is rethrown through the returned task, as an async method would.")]
+        public override System.Threading.Tasks.Task<T> InvokeAsync<T>(IExecutionContext executionContext)
+        {
+            // Without a post-invoke action there is nothing to run after the inner handlers, so their
+            // task is returned directly instead of being awaited in an async state machine.
+            if (this.OnPostInvoke == null)
+            {
+                try
+                {
+                    PreInvoke(executionContext);
+                    return base.InvokeAsync<T>(executionContext);
+                }
+                catch (Exception exception)
+                {
+                    return RethrowAsync<T>(ExceptionDispatchInfo.Capture(exception));
+                }
+            }
+
+            return InvokeWithPostInvokeAsync<T>(executionContext);
+        }
+
+        private async System.Threading.Tasks.Task<T> InvokeWithPostInvokeAsync<T>(IExecutionContext executionContext)
+            where T : AmazonWebServiceResponse, new()
         {
             PreInvoke(executionContext);
             var response = await base.InvokeAsync<T>(executionContext).ConfigureAwait(false);

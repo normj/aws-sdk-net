@@ -15,6 +15,8 @@
 
 using Amazon.Runtime.Internal.Util;
 using System;
+using System.Runtime.ExceptionServices;
+using System.Threading.Tasks;
 
 namespace Amazon.Runtime.Internal
 {
@@ -81,6 +83,20 @@ namespace Amazon.Runtime.Internal
             }
             throw new InvalidOperationException("Cannot invoke InnerHandler. InnerHandler is not set.");
         }
+
+        /// <summary>
+        /// Returns a task that ends the way an async method's task ends when that method throws the
+        /// captured exception: faulted, or canceled for an <see cref="OperationCanceledException"/>, with
+        /// the original exception object and stack trace. Handlers that return the inner handler's task
+        /// directly use this so that a synchronous throw still surfaces through the returned task.
+        /// </summary>
+#pragma warning disable CS1998 // Async method lacks 'await' operators
+        internal static async Task<T> RethrowAsync<T>(ExceptionDispatchInfo exception)
+        {
+            exception.Throw();
+            return default(T);
+        }
+#pragma warning restore CS1998
 
         /// <summary>
         /// Logs the metrics for the current execution context.
