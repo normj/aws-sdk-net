@@ -1,0 +1,88 @@
+name: Perf CI (fork)
+
+# Fork-only CI for AWSSDK.Core performance PRs on normj/aws-sdk-net.
+# Lives only on the fork's main branch and is never part of a PR, so nothing
+# needs to be dropped when a PR is promoted to aws/aws-sdk-net. Benchmarks are
+# in https://github.com/normj/aws-sdk-net-perf-benchmarks.
+
+permissions:
+  contents: read
+
+# pull_request only: a push trigger as well ran every check twice per PR push.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  core-unit-tests:
+    name: Core unit tests (${{ matrix.tfm }})
+    if: github.repository == 'normj/aws-sdk-net'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        tfm: [net8.0, net10.0, net11.0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            11.0.x
+      # Some credential and user-agent tests expect a resolvable default profile,
+      # as on the upstream CodeBuild hosts. Use dummy values; nothing calls AWS.
+      - name: Create dummy AWS profile
+        run: |
+          mkdir -p ~/.aws
+          printf '[default]\naws_access_key_id = AKIDEXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n' > ~/.aws/credentials
+          printf '[default]\nregion = us-east-1\n' > ~/.aws/config
+      - name: Test AWSSDK.UnitTests.Core
+        env:
+          TFM: ${{ matrix.tfm }}
+        run: |
+          dotnet test sdk/test/UnitTests/AWSSDK.UnitTests.Core.csproj -c Release -f "$TFM" \
+            --logger "trx;LogFileName=core-$TFM.trx" --results-directory test-results
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-${{ matrix.tfm }}
+          path: test-results
+          if-no-files-found: ignore
+
+  compile-core-and-services:
+    name: Compile Core, S3, DynamoDBv2 (all .NET targets)
+    if: github.repository == 'normj/aws-sdk-net'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            11.0.x
+      # Builds netstandard2.0;net8.0;net10.0;net11.0. Service code compiles against
+      # Core's public Internal types, so this catches signature breaks.
+      - name: Build AWSSDK.Core
+        run: dotnet build sdk/src/Core/AWSSDK.Core.NetStandard.csproj -c Release
+      - name: Build AWSSDK.S3
+        run: dotnet build sdk/src/Services/S3/AWSSDK.S3.NetStandard.csproj -c Release
+      - name: Build AWSSDK.DynamoDBv2
+        run: dotnet build sdk/src/Services/DynamoDBv2/AWSSDK.DynamoDBv2.NetStandard.csproj -c Release
