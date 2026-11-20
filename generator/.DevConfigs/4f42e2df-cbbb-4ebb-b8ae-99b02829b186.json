@@ -3,7 +3,8 @@
     "updateMinimum": false,
     "type": "patch",
     "changeLogMessages": [
-      "Reduced allocations and CPU time in SigV4 signing by formatting signing dates without DateTime.ToString and encoding the string to sign directly to UTF-8."
+      "Reduced allocations and CPU time in SigV4 signing by formatting signing dates without DateTime.ToString and encoding the string to sign directly to UTF-8.",
+      "Fixed the SigV4 signing-key cache so that different secret key, region and service combinations that are equal when joined with '/' no longer share a cached signing key."
     ]
   }
 }
