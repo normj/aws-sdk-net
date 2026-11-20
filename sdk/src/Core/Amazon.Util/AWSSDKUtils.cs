@@ -503,6 +503,18 @@ namespace Amazon.Util
             if (string.IsNullOrEmpty(resourcePath))
                 return Slash;
 
+            // The single-pass builder covers every case except encode with a null endpoint, which must throw
+            // after the segments are resolved, and a null greedy label value, which must throw as Split does.
+            // Both fall through to the segment-list path below.
+            string canonicalizedResourcePath = endpoint != null || !encode
+                ? TryBuildCanonicalResourcePath(resourcePath, encode, pathResources)
+                : null;
+            if (canonicalizedResourcePath != null)
+            {
+                LogCanonicalizedResourcePath(endpoint, resourcePath, encode, canonicalizedResourcePath);
+                return canonicalizedResourcePath;
+            }
+
             IEnumerable<UriComponent> encodedSegments = AWSSDKUtils.SplitResourcePathIntoSegmentsV2(resourcePath, pathResources);
 
             var pathWasPreEncoded = false;
@@ -519,8 +531,15 @@ namespace Amazon.Util
                 }
                 pathWasPreEncoded = true;
             }
-            string canonicalizedResourcePath = JoinResourcePathSegmentsV2(encodedSegments);
+            canonicalizedResourcePath = JoinResourcePathSegmentsV2(encodedSegments);
 
+            LogCanonicalizedResourcePath(endpoint, resourcePath, pathWasPreEncoded, canonicalizedResourcePath);
+
+            return canonicalizedResourcePath;
+        }
+
+        private static void LogCanonicalizedResourcePath(Uri endpoint, string resourcePath, bool pathWasPreEncoded, string canonicalizedResourcePath)
+        {
             var logger = Logger.GetLogger(typeof(AWSSDKUtils));
             if (logger.IsEnabled(Amazon.Runtime.Logging.SdkLogLevel.Debug))
             {
@@ -531,8 +550,158 @@ namespace Amazon.Util
                     endpoint == null ? "" : endpoint.AbsoluteUri,
                     canonicalizedResourcePath);
             }
+        }
 
-            return canonicalizedResourcePath;
+        /// <summary>
+        /// Builds the same string as <see cref="SplitResourcePathIntoSegmentsV2"/> followed by an optional
+        /// pre-encode of every segment and <see cref="JoinResourcePathSegmentsV2(IEnumerable{UriComponent})"/>,
+        /// in one pass and without the intermediate arrays, lists and segment objects. Literal segments are
+        /// encoded with the path character set and label values without it; a greedy label value is split at
+        /// each '/' into label segments. Returns null when a greedy label's value is null, so the caller can
+        /// take the segment-list path and throw exactly as before.
+        /// </summary>
+        private static string TryBuildCanonicalResourcePath(string resourcePath, bool encodeTwice, IDictionary<string, string> pathResources)
+        {
+            var hasPathResources = pathResources != null && pathResources.Count > 0;
+
+            // DefaultRequest keeps path resources in an ordinal Dictionary. For an ordinal dictionary a segment
+            // matches a key exactly when their characters are equal, so the keys can be compared with the segment
+            // span directly instead of allocating a substring per segment for TryGetValue.
+            var ordinalDictionary = hasPathResources ? pathResources as Dictionary<string, string> : null;
+            if (ordinalDictionary != null
+                && !ReferenceEquals(ordinalDictionary.Comparer, StringComparer.Ordinal)
+                && !ReferenceEquals(ordinalDictionary.Comparer, EqualityComparer<string>.Default))
+            {
+                ordinalDictionary = null;
+            }
+
+            Span<byte> scratch = stackalloc byte[512];
+            var builder = new ValueStringBuilder(stackalloc char[256]);
+
+            var start = 0;
+            while (true)
+            {
+                var slash = resourcePath.IndexOf(SlashChar, start);
+                var end = slash < 0 ? resourcePath.Length : slash;
+                var segment = resourcePath.AsSpan(start, end - start);
+                if (start > 0)
+                    builder.Append(SlashChar);
+
+                string resolvedSegment = null;
+                bool isLabel;
+                if (!hasPathResources)
+                {
+                    isLabel = false;
+                }
+                else if (ordinalDictionary != null)
+                {
+                    isLabel = false;
+                    foreach (var pathResource in ordinalDictionary)
+                    {
+                        if (segment.SequenceEqual(pathResource.Key.AsSpan()))
+                        {
+                            isLabel = true;
+                            resolvedSegment = pathResource.Value;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    isLabel = pathResources.TryGetValue(segment.ToString(), out resolvedSegment);
+                }
+
+                if (!isLabel)
+                {
+                    AppendUrlEncodedSegment(ref builder, segment, true, encodeTwice, scratch);
+                }
+                else if (segment.EndsWith("+}".AsSpan(), StringComparison.Ordinal))
+                {
+                    if (resolvedSegment == null)
+                    {
+                        builder.Dispose();
+                        return null;
+                    }
+
+                    // Greedy label: each '/'-separated part of the value is its own label segment.
+                    var valueStart = 0;
+                    while (true)
+                    {
+                        var valueSlash = resolvedSegment.IndexOf(SlashChar, valueStart);
+                        var valueEnd = valueSlash < 0 ? resolvedSegment.Length : valueSlash;
+                        if (valueStart > 0)
+                            builder.Append(SlashChar);
+                        AppendUrlEncodedSegment(ref builder, resolvedSegment.AsSpan(valueStart, valueEnd - valueStart), false, encodeTwice, scratch);
+                        if (valueSlash < 0)
+                            break;
+                        valueStart = valueSlash + 1;
+                    }
+                }
+                else
+                {
+                    AppendUrlEncodedSegment(ref builder, resolvedSegment.AsSpan(), false, encodeTwice, scratch);
+                }
+
+                if (slash < 0)
+                    break;
+                start = slash + 1;
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Appends <c>UrlEncode(segment, path)</c>, or <c>UrlEncode(UrlEncode(segment, path), path)</c> when
+        /// <paramref name="encodeTwice"/> is true. The encoder's output is always ASCII: it is either the input's
+        /// UTF-8 bytes when every byte is allowed (allowed bytes are all below 128) or a mix of allowed bytes and
+        /// %XX escapes. Encoding that output a second time with the same character set therefore only turns each
+        /// '%', which neither set allows, into "%25"; the uppercase hex digits and every other byte are allowed.
+        /// </summary>
+        private static void AppendUrlEncodedSegment(ref ValueStringBuilder builder, ReadOnlySpan<char> segment, bool path, bool encodeTwice, Span<byte> scratch)
+        {
+            if (segment.IsEmpty)
+                return;
+
+            byte[] rented = null;
+            try
+            {
+                var required = 3 * Encoding.UTF8.GetMaxByteCount(segment.Length);
+                var buffer = required <= scratch.Length
+                    ? scratch.Slice(0, required)
+                    : (rented = ArrayPool<byte>.Shared.Rent(required));
+
+                var encoded = UrlEncodeToSpan(3986, segment, path, buffer, out _);
+
+                var length = encoded.Length;
+                if (encodeTwice)
+                {
+                    for (var i = 0; i < encoded.Length; i++)
+                        if (encoded[i] == (byte)'%')
+                            length += 2;
+                }
+
+                var destination = builder.AppendSpan(length);
+                var pos = 0;
+                for (var i = 0; i < encoded.Length; i++)
+                {
+                    var b = encoded[i];
+                    if (encodeTwice && b == (byte)'%')
+                    {
+                        destination[pos++] = '%';
+                        destination[pos++] = '2';
+                        destination[pos++] = '5';
+                    }
+                    else
+                    {
+                        destination[pos++] = (char)b;
+                    }
+                }
+            }
+            finally
+            {
+                if (rented != null)
+                    ArrayPool<byte>.Shared.Return(rented);
+            }
         }
 
         /// <summary>
