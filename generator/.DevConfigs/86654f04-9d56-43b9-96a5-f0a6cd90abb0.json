@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time in the endpoint rules Substring function by checking for non-ASCII characters without LINQ."
+    ]
+  }
+}
