@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations on async calls by returning the inner handler's task directly from pipeline handlers that have no work to do after it (CallbackHandler without a post-invoke action, Signer and BaseAuthResolverHandler when their pre-invoke step completes synchronously)."
+    ]
+  }
+}
