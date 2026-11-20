@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time and allocations when endpoint rules parse ARNs, and when they check names that are not ARNs."
+    ]
+  }
+}
