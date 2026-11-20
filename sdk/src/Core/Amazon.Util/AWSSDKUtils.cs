@@ -1994,9 +1994,29 @@ namespace Amazon.Util
 
             // Fast path: scan for the first run of consecutive whitespace or a non-space whitespace character.
             // If none is found the string is already compact.
-            bool prevWasWhiteSpace = false;
             int firstRunIndex = -1;
             int firstNonWhiteSpace = -1;
+#if NET8_0_OR_GREATER
+            // Vectorized form of the loop below; it finds the same index. The first character the loop stops on
+            // is either a whitespace character other than ' ', or the second of two consecutive spaces (any other
+            // pair of consecutive whitespace contains a non-space whitespace character, which is found first).
+            var dataSpan = data.AsSpan();
+            int stop = dataSpan.IndexOfAny(CompressSpacesSearchValues.NonSpaceWhiteSpace);
+            int doubleSpace = (stop < 0 ? dataSpan : dataSpan.Slice(0, stop)).IndexOf("  ".AsSpan());
+            if (doubleSpace >= 0)
+            {
+                stop = doubleSpace + 1;
+            }
+
+            if (stop >= 0)
+            {
+                firstRunIndex = stop - 1;
+                // Before the stop index the only whitespace is single spaces, so the first non-whitespace
+                // character is at index 0 or 1, if there is one before the stop index.
+                firstNonWhiteSpace = dataSpan.Slice(0, stop).IndexOfAnyExcept(SPACE);
+            }
+#else
+            bool prevWasWhiteSpace = false;
             for (int i = 0; i < dataLength; i++)
             {
                 char c = data[i];
@@ -2016,6 +2036,7 @@ namespace Amazon.Util
                 }
                 prevWasWhiteSpace = isWS;
             }
+#endif
 
             if (firstRunIndex < 0)
             {
@@ -2041,6 +2062,25 @@ namespace Amazon.Util
 
             return CompressSpacesSlow(span, trimCorrection);
         }
+
+#if NET8_0_OR_GREATER
+        private static class CompressSpacesSearchValues
+        {
+            /// <summary>Every character for which <see cref="char.IsWhiteSpace(char)"/> is true, except ' '.</summary>
+            internal static readonly SearchValues<char> NonSpaceWhiteSpace = Create();
+
+            private static SearchValues<char> Create()
+            {
+                var chars = new List<char>();
+                for (int c = 0; c <= char.MaxValue; c++)
+                {
+                    if (c != ' ' && char.IsWhiteSpace((char)c))
+                        chars.Add((char)c);
+                }
+                return SearchValues.Create(chars.ToArray());
+            }
+        }
+#endif
 
         private static string CompressSpacesSlow(ReadOnlySpan<char> span, int firstRunIndex)
         {
