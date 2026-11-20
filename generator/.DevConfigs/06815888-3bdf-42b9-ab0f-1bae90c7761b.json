@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time when unmarshalling ISO 8601 timestamps (such as S3 LastModified) by parsing the strict UTC form directly instead of through decimal.TryParse and DateTime.Parse."
+    ]
+  }
+}

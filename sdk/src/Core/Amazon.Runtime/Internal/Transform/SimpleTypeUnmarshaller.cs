@@ -988,6 +988,15 @@ namespace Amazon.Runtime.Internal.Transform
         /// <returns></returns>
         internal static DateTime? UnmarshallInternal(string text, bool treatAsNullable)
         {
+            // Fast path for the strict UTC form services send (yyyy-MM-ddTHH:mm:ss[.f{1,7}]Z).
+            // Such text is never a valid decimal, so it would fall through to DateTime.Parse,
+            // which produces the same value; anything else takes the original path.
+            DateTime iso8601;
+            if (TryParseStrictIso8601Utc(text, out iso8601))
+            {
+                return iso8601;
+            }
+
             decimal seconds;
             if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out seconds))
             {
@@ -1003,6 +1012,60 @@ namespace Amazon.Runtime.Internal.Transform
 
                 return DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
             }
+        }
+
+        private static readonly int[] FractionScale = { 0, 1000000, 100000, 10000, 1000, 100, 10, 1 };
+
+        /// <summary>
+        /// Parses exactly <c>yyyy-MM-ddTHH:mm:ssZ</c> or <c>yyyy-MM-ddTHH:mm:ss.FZ</c> with 1 to 7
+        /// fraction digits, as a UTC <see cref="DateTime"/>. Returns false, leaving the caller to use
+        /// the general parser, for any other text or for out-of-range fields.
+        /// </summary>
+        internal static bool TryParseStrictIso8601Utc(string text, out DateTime value)
+        {
+            value = default(DateTime);
+            if (text == null)
+                return false;
+
+            int length = text.Length;
+            if (length < 20 || length == 21 || length > 28 || text[length - 1] != 'Z'
+                || text[4] != '-' || text[7] != '-' || text[10] != 'T' || text[13] != ':' || text[16] != ':')
+                return false;
+
+            int year, month, day, hour, minute, second;
+            if (!TryParseDigits(text, 0, 4, out year) || !TryParseDigits(text, 5, 2, out month)
+                || !TryParseDigits(text, 8, 2, out day) || !TryParseDigits(text, 11, 2, out hour)
+                || !TryParseDigits(text, 14, 2, out minute) || !TryParseDigits(text, 17, 2, out second))
+                return false;
+
+            int fractionTicks = 0;
+            if (length > 20)
+            {
+                int fractionDigits = length - 21;
+                if (text[19] != '.' || !TryParseDigits(text, 20, fractionDigits, out fractionTicks))
+                    return false;
+                fractionTicks *= FractionScale[fractionDigits];
+            }
+
+            if (year < 1 || month < 1 || month > 12 || day < 1 || day > DateTime.DaysInMonth(year, month)
+                || hour > 23 || minute > 59 || second > 59)
+                return false;
+
+            value = new DateTime(new DateTime(year, month, day, hour, minute, second).Ticks + fractionTicks, DateTimeKind.Utc);
+            return true;
+        }
+
+        private static bool TryParseDigits(string text, int start, int count, out int result)
+        {
+            result = 0;
+            for (int i = start; i < start + count; i++)
+            {
+                uint digit = (uint)(text[i] - '0');
+                if (digit > 9)
+                    return false;
+                result = result * 10 + (int)digit;
+            }
+            return true;
         }
     }
 
