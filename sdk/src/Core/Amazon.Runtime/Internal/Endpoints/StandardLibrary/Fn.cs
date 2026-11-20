@@ -420,6 +420,19 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         {
             if (string.IsNullOrEmpty(json))
                 return string.Empty;
+#if NET8_0_OR_GREATER
+            return InterpolateJsonStreaming(json, refs);
+#else
+            return InterpolateJsonDocument(json, refs);
+#endif
+        }
+
+        /// <summary>
+        /// The original implementation: parse into a JsonDocument, then write it back out with every
+        /// string node interpolated.
+        /// </summary>
+        private static string InterpolateJsonDocument(string json, Dictionary<string, object> refs)
+        {
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(json);
@@ -448,6 +461,158 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 return string.Empty;
             }
         }
+
+#if NET8_0_OR_GREATER
+        // Same as JsonDocument.Parse(string), which rejects a string that is not valid UTF-16.
+        private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+        private const int MaxStackallocJsonBytes = 1024;
+        private const int MaxCachedJsonBufferBytes = 4096;
+
+        /// <summary>
+        /// Per-thread output buffer and writer for <see cref="InterpolateJsonStreaming"/>. Neither is ever
+        /// handed to a caller; the method only returns the string it builds from the buffer.
+        /// </summary>
+        // Utf8JsonWriter.Dispose only flushes; over an ArrayBufferWriter there is nothing to release.
+#pragma warning disable CA1001 // Types that own disposable fields should be disposable
+        private sealed class JsonInterpolationScratch
+#pragma warning restore CA1001
+        {
+            public readonly System.Buffers.ArrayBufferWriter<byte> Buffer = new System.Buffers.ArrayBufferWriter<byte>(256);
+            public readonly Utf8JsonWriter Writer;
+
+            public JsonInterpolationScratch()
+            {
+                Writer = new Utf8JsonWriter(Buffer);
+            }
+        }
+
+        [ThreadStatic]
+        private static JsonInterpolationScratch _jsonScratch;
+
+        /// <summary>
+        /// Produces exactly what <see cref="InterpolateJsonDocument"/> produces, without building a
+        /// JsonDocument: one Utf8JsonReader pass validates the whole input (so malformed JSON still returns
+        /// an empty string before any template is evaluated), and a second pass copies tokens to a reused
+        /// writer, interpolating string values. String values with no braces are copied as UTF-8 without
+        /// being materialized, since Interpolate returns them unchanged.
+        /// </summary>
+        private static string InterpolateJsonStreaming(string json, Dictionary<string, object> refs)
+        {
+            byte[] rented = null;
+            int maxBytes = StrictUtf8.GetMaxByteCount(json.Length);
+            Span<byte> utf8 = maxBytes <= MaxStackallocJsonBytes
+                ? stackalloc byte[MaxStackallocJsonBytes]
+                : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(maxBytes));
+            try
+            {
+                int length;
+                try
+                {
+                    length = StrictUtf8.GetBytes(json.AsSpan(), utf8);
+                }
+                catch (EncoderFallbackException)
+                {
+                    // Let the original implementation raise its own exception for invalid UTF-16.
+                    return InterpolateJsonDocument(json, refs);
+                }
+                ReadOnlySpan<byte> input = utf8.Slice(0, length);
+
+                try
+                {
+                    var validator = new Utf8JsonReader(input);
+                    while (validator.Read())
+                    {
+                    }
+                }
+                catch (JsonException)
+                {
+                    return string.Empty;
+                }
+
+                var scratch = _jsonScratch ?? new JsonInterpolationScratch();
+                // Take the scratch out of the slot while it is in use, so a reentrant call on this
+                // thread (for example from a ToString() reached by Interpolate) gets its own.
+                _jsonScratch = null;
+                var buffer = scratch.Buffer;
+                var writer = scratch.Writer;
+                bool reusable = false;
+                try
+                {
+                    buffer.ResetWrittenCount();
+                    writer.Reset(buffer);
+
+                    var reader = new Utf8JsonReader(input);
+                    while (reader.Read())
+                    {
+                        switch (reader.TokenType)
+                        {
+                            case JsonTokenType.StartObject:
+                                writer.WriteStartObject();
+                                break;
+                            case JsonTokenType.EndObject:
+                                writer.WriteEndObject();
+                                break;
+                            case JsonTokenType.StartArray:
+                                writer.WriteStartArray();
+                                break;
+                            case JsonTokenType.EndArray:
+                                writer.WriteEndArray();
+                                break;
+                            case JsonTokenType.PropertyName:
+                                if (reader.ValueIsEscaped)
+                                    writer.WritePropertyName(reader.GetString());
+                                else
+                                    writer.WritePropertyName(reader.ValueSpan);
+                                break;
+                            case JsonTokenType.String:
+                                if (!reader.ValueIsEscaped && reader.ValueSpan.IndexOfAny((byte)'{', (byte)'}') < 0)
+                                    writer.WriteStringValue(reader.ValueSpan);
+                                else
+                                    writer.WriteStringValue(Interpolate(reader.GetString(), refs));
+                                break;
+                            case JsonTokenType.Number:
+                                writer.WriteRawValue(reader.ValueSpan, skipInputValidation: true);
+                                break;
+                            case JsonTokenType.True:
+                                writer.WriteBooleanValue(true);
+                                break;
+                            case JsonTokenType.False:
+                                writer.WriteBooleanValue(false);
+                                break;
+                            case JsonTokenType.Null:
+                                writer.WriteNullValue();
+                                break;
+                        }
+                    }
+                    writer.Flush();
+
+                    var result = Encoding.UTF8.GetString(buffer.WrittenSpan);
+                    reusable = buffer.Capacity <= MaxCachedJsonBufferBytes;
+                    return result;
+                }
+                catch (JsonException)
+                {
+                    // The original implementation's catch covered the write pass too.
+                    return string.Empty;
+                }
+                finally
+                {
+                    if (reusable)
+                    {
+                        _jsonScratch = scratch;
+                    }
+                }
+            }
+            finally
+            {
+                if (rented != null)
+                {
+                    System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+                }
+            }
+        }
+#endif
 
         private static void InterpolateJson(JsonElement element, Dictionary<string, object> refs, Utf8JsonWriter writer)
         {
