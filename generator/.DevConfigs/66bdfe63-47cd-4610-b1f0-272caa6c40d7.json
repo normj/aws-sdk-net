@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations in SigV4 signing by writing the Authorization header and presigned URL authentication parameters in one pass in AWS4SigningResult."
+    ]
+  }
+}
