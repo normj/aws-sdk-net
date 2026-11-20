@@ -168,31 +168,33 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         public static bool IsValidHostLabel(string hostLabel, bool allowSubDomains)
         {
-            var hosts = new List<string>();
-
-            if (allowSubDomains)
+            if (!allowSubDomains)
             {
-                hosts.AddRange(hostLabel.Split('.'));
-            }
-            else
-            {
-                hosts.Add(hostLabel);
+                return hostLabel != null && IsVirtualHostableName(hostLabel.AsSpan());
             }
 
-            foreach (var host in hosts)
+            // Validate each dot-separated label in place instead of materializing hostLabel.Split('.').
+            // string.IndexOf throws NullReferenceException for a null hostLabel, as Split did.
+            int start = 0;
+            while (true)
             {
-                if (!IsVirtualHostableName(host))
+                int dotPos = hostLabel.IndexOf('.', start);
+                int end = dotPos < 0 ? hostLabel.Length : dotPos;
+                if (!IsVirtualHostableName(hostLabel.AsSpan(start, end - start)))
                 {
                     return false;
                 }
+                if (dotPos < 0)
+                {
+                    return true;
+                }
+                start = dotPos + 1;
             }
-
-            return true;
         }
 
-        private static bool IsVirtualHostableName(string name)
+        private static bool IsVirtualHostableName(ReadOnlySpan<char> name)
         {
-            if (string.IsNullOrEmpty(name) || name.Length < 1 || name.Length > 63)
+            if (name.Length < 1 || name.Length > 63)
             {
                 return false;
             }
@@ -223,30 +225,32 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 return false;
             }
 
-            var hosts = new List<string>();
-            if (allowSubDomains)
+            if (!allowSubDomains)
             {
-                hosts.AddRange(hostLabel.Split('.'));
-            }
-            else
-            {
-                hosts.Add(hostLabel);
+                return IsVirtualHostableS3Name(hostLabel.AsSpan());
             }
 
-            foreach (var host in hosts)
+            // Validate each dot-separated label in place instead of materializing hostLabel.Split('.').
+            int start = 0;
+            while (true)
             {
-                if (!IsVirtualHostableS3Name(host))
+                int dotPos = hostLabel.IndexOf('.', start);
+                int end = dotPos < 0 ? hostLabel.Length : dotPos;
+                if (!IsVirtualHostableS3Name(hostLabel.AsSpan(start, end - start)))
                 {
                     return false;
                 }
+                if (dotPos < 0)
+                {
+                    return true;
+                }
+                start = dotPos + 1;
             }
-
-            return true;
         }
 
-        private static bool IsVirtualHostableS3Name(string name)
+        private static bool IsVirtualHostableS3Name(ReadOnlySpan<char> name)
         {
-            if (string.IsNullOrEmpty(name) || name.Length < 3 || name.Length > 63)
+            if (name.Length < 3 || name.Length > 63)
             {
                 return false;
             }
@@ -267,11 +271,26 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         private static bool IsIpV4Address(string name)
         {
             const byte IpV4AddressPartsCount = 4;
-            var parts = name.Split('.');
-            if (parts.Length != IpV4AddressPartsCount)
+
+            // An IPv4 address has exactly three dots. Count them first so the common case (a name
+            // with no dots) does not allocate. string.IndexOf throws NullReferenceException for a
+            // null name, as Split did.
+            int dots = 0;
+            int pos = name.IndexOf('.');
+            while (pos >= 0)
+            {
+                if (++dots >= IpV4AddressPartsCount)
+                {
+                    return false;
+                }
+                pos = name.IndexOf('.', pos + 1);
+            }
+            if (dots != IpV4AddressPartsCount - 1)
             {
                 return false;
             }
+
+            var parts = name.Split('.');
             foreach (var part in parts)
             {
                 byte result;
