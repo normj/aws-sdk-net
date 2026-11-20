@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time and allocations in SigV4 signing by building the canonical resource path in one pass in AWSSDKUtils.CanonicalizeResourcePathV2."
+    ]
+  }
+}
