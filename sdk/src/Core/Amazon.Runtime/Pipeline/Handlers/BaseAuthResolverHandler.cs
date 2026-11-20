@@ -63,7 +63,7 @@ namespace Amazon.Runtime.Internal
 
             for (int i = 0; i < preferredOptions.Count; i++)
             {
-                var scheme = _supportedSchemes.FirstOrDefault(s => s.SchemeId == preferredOptions[i].SchemeId);
+                var scheme = FindSupportedScheme(preferredOptions[i].SchemeId);
                 if (scheme == null)
                 {
                     // Current auth scheme option is not enabled / supported, continue iterating.
@@ -159,7 +159,7 @@ namespace Amazon.Runtime.Internal
 
             for (int i = 0; i < preferredOptions.Count; i++)
             {
-                var scheme = _supportedSchemes.FirstOrDefault(s => s.SchemeId == preferredOptions[i].SchemeId);
+                var scheme = FindSupportedScheme(preferredOptions[i].SchemeId);
                 if (scheme == null)
                 {
                     // Current auth scheme option is not enabled / supported, continue iterating.
@@ -231,6 +231,24 @@ namespace Amazon.Runtime.Internal
                 AddUserAgentDetails(executionContext);
                 ApplySigningRegionSetOverrides(executionContext.RequestContext);
             }
+        }
+
+        /// <summary>
+        /// Returns the first supported scheme whose id equals <paramref name="schemeId"/>, or null.
+        /// Same result as <c>_supportedSchemes.FirstOrDefault(s => s.SchemeId == schemeId)</c>, without
+        /// allocating a closure, a delegate and a boxed enumerator on every request.
+        /// </summary>
+        private IAuthScheme<BaseIdentity> FindSupportedScheme(string schemeId)
+        {
+            foreach (var scheme in _supportedSchemes)
+            {
+                if (scheme.SchemeId == schemeId)
+                {
+                    return scheme;
+                }
+            }
+
+            return null;
         }
 
         protected virtual ISigner GetSigner(IAuthScheme<BaseIdentity> scheme)
