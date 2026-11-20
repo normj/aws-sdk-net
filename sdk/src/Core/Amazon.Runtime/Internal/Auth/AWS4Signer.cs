@@ -78,8 +78,8 @@ namespace Amazon.Runtime.Internal.Auth
         // it is replaced in place when the UTC date changes, so stale keys never accumulate.
         // Oldest entries are evicted first once the limit is reached.
         private const int SigningKeyCacheLimit = 100;
-        private static readonly ConcurrentDictionary<string, SigningKeyCacheEntry> _signingKeyCache = new();
-        private static readonly ConcurrentQueue<string> _signingKeyCacheOrder = new();
+        private static readonly ConcurrentDictionary<(string Secret, string Region, string Service), SigningKeyCacheEntry> _signingKeyCache = new();
+        private static readonly ConcurrentQueue<(string Secret, string Region, string Service)> _signingKeyCacheOrder = new();
 
         /// <summary>
         /// A cached signing key. On .NET 8+ it also pools keyed HMAC-SHA256 instances for the signature step,
@@ -396,7 +396,7 @@ namespace Amazon.Runtime.Internal.Auth
             }
 
             var dt = requestDateTime;
-            headers[HeaderKeys.XAmzDateHeader] = dt.ToUniversalTime().ToString(AWSSDKUtils.ISO8601BasicDateTimeFormat, CultureInfo.InvariantCulture);
+            headers[HeaderKeys.XAmzDateHeader] = FormatDateTime(dt, AWSSDKUtils.ISO8601BasicDateTimeFormat);
 
             return dt;
         }
@@ -514,29 +514,104 @@ namespace Amazon.Runtime.Internal.Auth
             var dateStamp = FormatDateTime(signedAt, AWSSDKUtils.ISO8601BasicDateFormat);
             var scope = $"{dateStamp}/{region}/{service}/{Terminator}";
             var canonicalRequestHash = AWSSDKUtils.ToHex(ComputeHash(canonicalRequest), true);
-            var stringToSign = $"{AWS4AlgorithmTag}\n{FormatDateTime(signedAt, AWSSDKUtils.ISO8601BasicDateTimeFormat)}\n{scope}\n{canonicalRequestHash}";
-
-            if (metrics != null && metrics.IsEnabled)
-                metrics.AddProperty(Metric.StringToSign, new StringBuilder(stringToSign));
-
             var signingKeyEntry = GetSigningKeyEntry(awsSecretAccessKey, region, dateStamp, service);
 #if NET8_0_OR_GREATER
+            // Encode the string to sign straight into a UTF-8 buffer; a string is only built for metrics.
+            if (metrics != null && metrics.IsEnabled)
+                metrics.AddProperty(Metric.StringToSign, new StringBuilder(BuildStringToSign(signedAt, scope, canonicalRequestHash)));
+
             var signature = new byte[HMACSHA256.HashSizeInBytes];
-            var stringToSignBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(stringToSign));
+            var maxLength = AWS4AlgorithmTag.Length + 1 + ISO8601BasicDateTimeLength + 1
+                            + Encoding.UTF8.GetMaxByteCount(scope.Length) + 1 + canonicalRequestHash.Length;
+            byte[] rented = null;
+            Span<byte> stringToSignBuffer = maxLength <= 512
+                ? stackalloc byte[512]
+                : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(maxLength));
             try
             {
-                var written = Encoding.UTF8.GetBytes(stringToSign, stringToSignBuffer);
-                signingKeyEntry.ComputeHmac(stringToSignBuffer.AsSpan(0, written), signature);
+                var written = WriteStringToSign(stringToSignBuffer, signedAt.ToUniversalTime(), scope, canonicalRequestHash);
+                signingKeyEntry.ComputeHmac(stringToSignBuffer.Slice(0, written), signature);
             }
             finally
             {
-                System.Buffers.ArrayPool<byte>.Shared.Return(stringToSignBuffer, clearArray: true);
+                if (rented != null)
+                    System.Buffers.ArrayPool<byte>.Shared.Return(rented, clearArray: true);
             }
 #else
+            var stringToSign = BuildStringToSign(signedAt, scope, canonicalRequestHash);
+            if (metrics != null && metrics.IsEnabled)
+                metrics.AddProperty(Metric.StringToSign, new StringBuilder(stringToSign));
+
             var signature = ComputeKeyedHash(SignerAlgorithm, signingKeyEntry.Key, stringToSign);
 #endif
             return new AWS4SigningResult(awsAccessKey, awsSecretAccessKey, signedAt, signedHeaders, scope, signingKeyEntry.Key, signature);
         }
+
+        private static string BuildStringToSign(DateTime signedAt, string scope, string canonicalRequestHash)
+        {
+            return $"{AWS4AlgorithmTag}\n{FormatDateTime(signedAt, AWSSDKUtils.ISO8601BasicDateTimeFormat)}\n{scope}\n{canonicalRequestHash}";
+        }
+
+        private const int ISO8601BasicDateTimeLength = 16; // yyyyMMddTHHmmssZ
+        private const int ISO8601BasicDateLength = 8;      // yyyyMMdd
+
+#if NET8_0_OR_GREATER
+        private static ReadOnlySpan<byte> AWS4AlgorithmTagUtf8 => "AWS4-HMAC-SHA256"u8;
+
+        /// <summary>
+        /// Writes the UTF-8 bytes of the string to sign ("AWS4-HMAC-SHA256\n{date-time}\n{scope}\n{hash}") into
+        /// <paramref name="destination"/>, which must be large enough for the worst-case UTF-8 length, and returns
+        /// the number of bytes written.
+        /// </summary>
+        private static int WriteStringToSign(Span<byte> destination, DateTime utcSignedAt, string scope, string canonicalRequestHash)
+        {
+            AWS4AlgorithmTagUtf8.CopyTo(destination);
+            var pos = AWS4AlgorithmTagUtf8.Length;
+            destination[pos++] = (byte)'\n';
+
+            Span<char> dateTime = stackalloc char[ISO8601BasicDateTimeLength];
+            WriteISO8601Basic(utcSignedAt, dateTime, includeTime: true);
+            for (int i = 0; i < dateTime.Length; i++)
+                destination[pos++] = (byte)dateTime[i];
+            destination[pos++] = (byte)'\n';
+
+            pos += Encoding.UTF8.GetBytes(scope, destination.Slice(pos));
+            destination[pos++] = (byte)'\n';
+
+            // The hash is lowercase hex, so ASCII.
+            pos += Encoding.UTF8.GetBytes(canonicalRequestHash, destination.Slice(pos));
+            return pos;
+        }
+
+        /// <summary>
+        /// Writes <paramref name="utc"/> as yyyyMMdd, or as yyyyMMddTHHmmssZ when <paramref name="includeTime"/> is true,
+        /// matching DateTime.ToString with those formats and the invariant culture.
+        /// </summary>
+        private static void WriteISO8601Basic(DateTime utc, Span<char> destination, bool includeTime)
+        {
+            utc.Deconstruct(out int year, out int month, out int day);
+            WriteDigits(destination, year, 4);
+            WriteDigits(destination.Slice(4), month, 2);
+            WriteDigits(destination.Slice(6), day, 2);
+            if (includeTime)
+            {
+                destination[8] = 'T';
+                WriteDigits(destination.Slice(9), utc.Hour, 2);
+                WriteDigits(destination.Slice(11), utc.Minute, 2);
+                WriteDigits(destination.Slice(13), utc.Second, 2);
+                destination[15] = 'Z';
+            }
+        }
+
+        private static void WriteDigits(Span<char> destination, int value, int count)
+        {
+            for (int i = count - 1; i >= 0; i--)
+            {
+                destination[i] = (char)('0' + value % 10);
+                value /= 10;
+            }
+        }
+#endif
 
         private static string ComputePayloadHashHex(byte[] payloadBytes)
         {
@@ -552,7 +627,7 @@ namespace Amazon.Runtime.Internal.Auth
         /// </summary>
         private static SigningKeyCacheEntry GetSigningKeyEntry(string awsSecretAccessKey, string region, string dateStamp, string service)
         {
-            var cacheKey = string.Concat(awsSecretAccessKey, "/", region, "/", service);
+            var cacheKey = (awsSecretAccessKey, region, service);
             if (_signingKeyCache.TryGetValue(cacheKey, out var entry) && entry.DateStamp == dateStamp)
             {
                 return entry;
@@ -590,6 +665,13 @@ namespace Amazon.Runtime.Internal.Auth
         /// <returns>The UTC date/time in the requested format</returns>
         public static string FormatDateTime(DateTime dt, string formatString)
         {
+#if NET8_0_OR_GREATER
+            // Fast paths for the two formats SigV4 uses on every request; the output is identical to ToString.
+            if (string.Equals(formatString, AWSSDKUtils.ISO8601BasicDateTimeFormat, StringComparison.Ordinal))
+                return string.Create(ISO8601BasicDateTimeLength, dt.ToUniversalTime(), static (chars, utc) => WriteISO8601Basic(utc, chars, includeTime: true));
+            if (string.Equals(formatString, AWSSDKUtils.ISO8601BasicDateFormat, StringComparison.Ordinal))
+                return string.Create(ISO8601BasicDateLength, dt.ToUniversalTime(), static (chars, utc) => WriteISO8601Basic(utc, chars, includeTime: false));
+#endif
             return dt.ToUniversalTime().ToString(formatString, CultureInfo.InvariantCulture);
         }
 
