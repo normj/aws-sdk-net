@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request CPU time and allocations when building the User-Agent header by reusing the sanitized client User-Agent and app id components between requests."
+    ]
+  }
+}

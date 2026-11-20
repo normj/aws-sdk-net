@@ -234,6 +234,11 @@ namespace Amazon.Runtime
         /// </summary>
         public abstract string UserAgent { get; }
 
+        // The sanitized UserAgent and "app/{ClientAppId}" User-Agent components most recently built by the
+        // Marshaller handler for this config, so requests from the same client reuse them.
+        internal SanitizedUserAgentComponent SanitizedUserAgentComponent;
+        internal SanitizedUserAgentComponent SanitizedClientAppIdComponent;
+
         /// <summary>
         /// When set to true, the service client will use the x-amz-user-agent
         /// header instead of the User-Agent header to report version and

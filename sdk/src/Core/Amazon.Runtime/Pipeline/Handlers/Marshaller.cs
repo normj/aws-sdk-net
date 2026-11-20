@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 using Amazon.Runtime.Internal.UserAgent;
 using Amazon.Runtime.Telemetry;
 using Amazon.Runtime.Telemetry.Metrics;
@@ -184,6 +185,34 @@ namespace Amazon.Runtime.Internal
             return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(EnvironmentVariables.AWS_LAMBDA_FUNCTION_NAME));
         }
 
+        private const string ClientAppIdPrefix = "app/";
+        private const string ClientAsyncComponent = "md/ClientAsync";
+        private const string ClientSyncComponent = "md/ClientSync";
+        private const string InitCollectionsOnComponent = "cfg/init-coll#1";
+        private const string InitCollectionsOffComponent = "cfg/init-coll#0";
+
+        // Shared caches for client configs that are not a ClientConfig and so have no cache fields of their own.
+        // One per component, because a cached entry is matched on its source value only, not on its prefix.
+        private static SanitizedUserAgentComponent _sharedUserAgentComponentCache;
+        private static SanitizedUserAgentComponent _sharedClientAppIdComponentCache;
+
+        /// <summary>
+        /// Returns <paramref name="prefix"/> followed by <paramref name="value"/> with the characters a User-Agent
+        /// does not allow replaced, reusing the string from <paramref name="cache"/> when it was produced from the
+        /// same value. The client's User-Agent and app id rarely change, so this avoids re-running the replacement
+        /// regex on every request.
+        /// </summary>
+        private static string GetSanitizedComponent(ref SanitizedUserAgentComponent cache, string prefix, string value)
+        {
+            var cached = Volatile.Read(ref cache);
+            if (cached != null && string.Equals(cached.Source, value, StringComparison.Ordinal))
+                return cached.Component;
+
+            var component = string.Concat(prefix, InternalSDKUtils.ReplaceInvalidUserAgentCharacters(value));
+            Volatile.Write(ref cache, new SanitizedUserAgentComponent(value, component));
+            return component;
+        }
+
         private static void UpdateUserAgentDetails(IRequestContext requestContext)
         {
             if (requestContext.Request.Headers.TryGetValue("smithy-protocol", out var smithyProtocol)
@@ -200,15 +229,20 @@ namespace Amazon.Runtime.Internal
             else if (accountIdMode == AccountIdEndpointMode.REQUIRED)
                 requestContext.UserAgentDetails.AddFeature(UserAgentFeatureId.ACCOUNT_ID_MODE_REQUIRED);
 
-            requestContext.UserAgentDetails.AddUserAgentComponent(InternalSDKUtils.ReplaceInvalidUserAgentCharacters(requestContext.ClientConfig.UserAgent));
+            var clientConfig = requestContext.ClientConfig;
+            var cacheOwner = clientConfig as ClientConfig;
 
-            var clientAppId = requestContext.ClientConfig.ClientAppId;
+            requestContext.UserAgentDetails.AddUserAgentComponent(
+                GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedUserAgentComponent : ref _sharedUserAgentComponentCache, prefix: null, clientConfig.UserAgent));
+
+            var clientAppId = clientConfig.ClientAppId;
             if (!string.IsNullOrEmpty(clientAppId))
-                requestContext.UserAgentDetails.AddUserAgentComponent($"app/{InternalSDKUtils.ReplaceInvalidUserAgentCharacters(clientAppId)}");
+                requestContext.UserAgentDetails.AddUserAgentComponent(
+                    GetSanitizedComponent(ref cacheOwner != null ? ref cacheOwner.SanitizedClientAppIdComponent : ref _sharedClientAppIdComponentCache, ClientAppIdPrefix, clientAppId));
 
-            requestContext.UserAgentDetails.AddUserAgentComponent($"md/{(requestContext.IsAsync ? "ClientAsync" : "ClientSync")}");
+            requestContext.UserAgentDetails.AddUserAgentComponent(requestContext.IsAsync ? ClientAsyncComponent : ClientSyncComponent);
 
-            requestContext.UserAgentDetails.AddUserAgentComponent($"cfg/init-coll#{(AWSConfigs.InitializeCollections ? '1' : '0')}");
+            requestContext.UserAgentDetails.AddUserAgentComponent(AWSConfigs.InitializeCollections ? InitCollectionsOnComponent : InitCollectionsOffComponent);
 
             SetObservabilityFeatureIds(requestContext);
         }
@@ -239,5 +273,20 @@ namespace Amazon.Runtime.Internal
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// A sanitized User-Agent component together with the unsanitized value it was produced from.
+    /// </summary>
+    internal sealed class SanitizedUserAgentComponent
+    {
+        internal SanitizedUserAgentComponent(string source, string component)
+        {
+            Source = source;
+            Component = component;
+        }
+
+        internal string Source { get; }
+        internal string Component { get; }
     }
 }
