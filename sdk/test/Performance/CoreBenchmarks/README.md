@@ -23,22 +23,69 @@ sdk/test/Performance/CoreBenchmarks/ab.sh origin/perf/infra HEAD '*SigningBenchm
 ```
 
 Defaults: runtimes `net10.0 net11.0`, 3 interleaved rounds (base, PR, base, PR, base, PR),
-BDN `Default` job, MemoryDiagnoser. Options: `--rounds`, `--runtimes`, `--job Short` (only
-for quick local iteration, never for PR numbers), `--out`.
+BDN `Default` job, MemoryDiagnoser. Options: `--rounds`, `--runtimes`, `--job Short` or
+`--job Dry` (only for quick local iteration, never for PR numbers), `--out`,
+`--background`, `--keep-worktrees`.
 
-What the script does:
+### Running in the background
 
-1. Creates detached worktrees under `~/code/perf-ab-worktrees/` for both commits.
-2. Copies the PR's `CoreBenchmarks` source into the base worktree, so both sides run the
+A full run takes 15 to 30 minutes. From an agent's shell tool, start it with `--background`:
+
+```bash
+sdk/test/Performance/CoreBenchmarks/ab.sh origin/perf/infra bench/core-signing-foo '*SigningBenchmarks*' \
+  --out ~/code/perf-ab-results/signing/foo --background
+# poll until the log ends with "summary:" (success) or an error
+tail -3 ~/code/perf-ab-results/signing/foo/ab.log
+```
+
+`--background` runs the script under `setsid nohup`, writes `ab.log` and `ab.pid` to the
+output directory and returns immediately. Do not use a plain `nohup ... &`: the run is killed
+when the shell tool call returns.
+
+### What the script does
+
+1. Resolves both refs to SHAs at start, so a branch that moves later does not affect the run.
+2. Copies `ab.sh` and `compare.py` into the output directory and uses those copies. Switching
+   branches or editing the scripts in the calling worktree mid-run cannot break a run.
+3. Creates a fresh pair of detached worktrees for this run under
+   `~/code/perf-ab-worktrees/run-<id>/` and removes them when the run exits (pass
+   `--keep-worktrees` to keep them). Concurrent runs, including runs with the same base SHA,
+   never share a checkout. Each run needs about 3.5 GB of disk while it is running.
+4. Copies the PR's `CoreBenchmarks` source into the base worktree, so both sides run the
    same benchmark code and only `AWSSDK.Core` differs. Benchmarks must therefore only call
    APIs that exist on the base commit.
-3. Builds only `CoreBenchmarks.csproj` and its references on each side (never the full repo).
-4. Takes an exclusive lock (`/tmp/core-bench.lock`) for the measurement phase, so only one
-   benchmark runs on the machine at a time. Builds happen outside the lock.
-5. Writes `summary.md` to the output directory. Paste it into the PR description.
+5. Builds only `CoreBenchmarks.csproj` and its references on each side (never the full repo).
+6. Takes an exclusive lock (`/tmp/core-bench.lock`) for the measurement phase, so only one
+   benchmark runs on the machine at a time. Worktree setup and builds happen outside the lock.
+7. Before each measurement, waits until the machine is quiet: the number of other runnable
+   tasks, averaged over 5 seconds, must be at or below `AB_MAX_LOAD` (default `nproc / 8`,
+   minimum 2; 2 on the 16-core dev host). It waits up to `AB_LOAD_WAIT` seconds (default
+   1800), then measures anyway and flags that measurement in the summary.
+8. Writes `summary.md` to the output directory. Paste it into the PR description.
 
-A row is marked `faster` or `slower` only when the median change is at least 5% and every
-PR round beats (or loses to) every base round. Anything else is `same`.
+### Reading the summary
+
+- **Time** is `faster` or `slower` only when the median changes by at least 5% and every PR
+  round beats (or loses to) every base round. Anything else is `same`.
+- **Alloc** is `less` or `more` under the same rule with a 1% threshold. Allocation is close
+  to deterministic, so a small consistent change is real.
+- **Overall** is `win` when at least one row is `faster` or `less` and none is `slower` or
+  `more`. That is the bar for opening a perf PR. It is `regression` when any row is `slower`
+  or `more`, and `no measurable change` otherwise.
+- A warning block appears if any measurement started while the machine was busy. Treat time
+  numbers from such a run as noisy and re-run it.
+
+### Keeping the machine quiet
+
+Other heavy work on the host (unit test runs, reviewer builds, `git gc`) skews timings. Agents
+running heavy commands while benchmarks may be running should wait for the benchmark lock:
+
+```bash
+flock /tmp/core-bench.lock dotnet test ...
+```
+
+This only waits between whole A/B runs, not between rounds. The quiet-machine check in step 7
+covers work that does not take the lock.
 
 Always use real paths (`/local/home/...`), not the `/home` symlink, when running `dotnet`
 commands by hand on the dev host. Mixed paths break MSBuild project references.
