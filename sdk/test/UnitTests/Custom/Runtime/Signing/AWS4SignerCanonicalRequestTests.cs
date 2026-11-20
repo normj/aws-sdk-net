@@ -91,6 +91,12 @@ namespace AWSSDK.UnitTests.Signing
             Assert.AreEqual(expected.ForAuthorizationHeader, result.ForAuthorizationHeader);
         }
 
+        [TestMethod]
+        public void ComputeHash_NullString_Throws()
+        {
+            Assert.ThrowsExactly<ArgumentNullException>(() => AWS4Signer.ComputeHash((string)null));
+        }
+
         private static void AssertRecordedCanonicalRequestWasSigned(RequestMetrics metrics)
         {
             var canonicalRequest = (string)metrics.Properties[Metric.CanonicalRequest].Single();

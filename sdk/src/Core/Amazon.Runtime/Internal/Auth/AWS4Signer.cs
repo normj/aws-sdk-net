@@ -812,7 +812,17 @@ namespace Amazon.Runtime.Internal.Auth
         {
 #if NET8_0_OR_GREATER
             // Rent from the array pool instead of allocating a byte[] copy of the canonical request.
-            return ComputeHash(data.AsSpan());
+            // The buffer is cleared when returned as the data can contain the session token header.
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(data));
+            try
+            {
+                var written = Encoding.UTF8.GetBytes(data, buffer);
+                return SHA256.HashData(buffer.AsSpan(0, written));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            }
 #else
             return ComputeHash(Encoding.UTF8.GetBytes(data));
 #endif
