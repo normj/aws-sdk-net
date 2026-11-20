@@ -572,6 +572,21 @@ namespace Amazon.Runtime
         /// <param name="headers">A dictionary of header names and values.</param>
         public void SetRequestHeaders(IDictionary<string, string> headers)
         {
+            // DefaultRequest stores its headers in a Dictionary. Enumerating it through the concrete type
+            // uses the struct enumerator instead of boxing one per request; the order is the same.
+            if (headers is Dictionary<string, string> dictionary)
+            {
+                foreach (var kvp in dictionary)
+                {
+                    if (ContentHeaderNames.Contains(kvp.Key))
+                        continue;
+
+                    _request.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value);
+                }
+
+                return;
+            }
+
             foreach (var kvp in headers)
             {
                 if (ContentHeaderNames.Contains(kvp.Key))
