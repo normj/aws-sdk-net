@@ -337,7 +337,7 @@ namespace Amazon.Runtime.Internal.Auth
             var bodyHash = SetRequestBodyHash(request, SignPayload, bodySha, ChunkedUploadWrapperStream.V4_SIGNATURE_LENGTH);
             var sortedHeaders = SortAndPruneHeaders(request.Headers);
 
-            var canonicalRequest = CanonicalizeRequestHelper(
+            var canonicalRequestHash = CanonicalizeAndHashRequest(
                                                              request.Endpoint,
                                                              request.ResourcePath,
                                                              request.HttpMethod,
@@ -346,18 +346,17 @@ namespace Amazon.Runtime.Internal.Auth
                                                              bodyHash,
                                                              request.PathResources,
                                                              request.UseDoubleEncoding,
+                                                             metrics,
                                                              out var signedHeaderNames);
-            if (metrics != null)
-                metrics.AddProperty(Metric.CanonicalRequest, canonicalRequest);
             request.SignatureVersion = SignatureVersion.SigV4;
-            return ComputeSignature(awsAccessKeyId,
-                                    awsSecretAccessKey,
-                                    request.DeterminedSigningRegion,
-                                    signedAt,
-                                    serviceSigningName,
-                                    signedHeaderNames,
-                                    canonicalRequest,
-                                    metrics);
+            return ComputeSignatureFromHash(awsAccessKeyId,
+                                            awsSecretAccessKey,
+                                            request.DeterminedSigningRegion,
+                                            signedAt,
+                                            serviceSigningName,
+                                            signedHeaderNames,
+                                            canonicalRequestHash,
+                                            metrics);
         }
 
         #region Public Signing Helpers
@@ -511,9 +510,24 @@ namespace Amazon.Runtime.Internal.Auth
                                                          string canonicalRequest,
                                                          RequestMetrics metrics)
         {
+            var canonicalRequestHash = AWSSDKUtils.ToHex(ComputeHash(canonicalRequest), true);
+            return ComputeSignatureFromHash(awsAccessKey, awsSecretAccessKey, region, signedAt, service, signedHeaders, canonicalRequestHash, metrics);
+        }
+
+        /// <summary>
+        /// Computes the AWS4 signature given the lowercase hex SHA-256 hash of the canonical request.
+        /// </summary>
+        internal static AWS4SigningResult ComputeSignatureFromHash(string awsAccessKey,
+                                                                  string awsSecretAccessKey,
+                                                                  string region,
+                                                                  DateTime signedAt,
+                                                                  string service,
+                                                                  string signedHeaders,
+                                                                  string canonicalRequestHash,
+                                                                  RequestMetrics metrics)
+        {
             var dateStamp = FormatDateTime(signedAt, AWSSDKUtils.ISO8601BasicDateFormat);
             var scope = $"{dateStamp}/{region}/{service}/{Terminator}";
-            var canonicalRequestHash = AWSSDKUtils.ToHex(ComputeHash(canonicalRequest), true);
             var stringToSign = $"{AWS4AlgorithmTag}\n{FormatDateTime(signedAt, AWSSDKUtils.ISO8601BasicDateTimeFormat)}\n{scope}\n{canonicalRequestHash}";
 
             if (metrics != null && metrics.IsEnabled)
@@ -798,6 +812,18 @@ namespace Amazon.Runtime.Internal.Auth
         {
 #if NET8_0_OR_GREATER
             // Rent from the array pool instead of allocating a byte[] copy of the canonical request.
+            return ComputeHash(data.AsSpan());
+#else
+            return ComputeHash(Encoding.UTF8.GetBytes(data));
+#endif
+        }
+
+#if NET8_0_OR_GREATER
+        /// <summary>
+        /// Computes the SHA-256 hash of the UTF-8 encoding of <paramref name="data"/>.
+        /// </summary>
+        private static byte[] ComputeHash(ReadOnlySpan<char> data)
+        {
             // The buffer is cleared when returned as the data can contain the session token header.
             var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(data));
             try
@@ -809,10 +835,8 @@ namespace Amazon.Runtime.Internal.Auth
             {
                 System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
             }
-#else
-            return ComputeHash(Encoding.UTF8.GetBytes(data));
-#endif
         }
+#endif
 
         /// <summary>
         /// Computes the non-keyed hash of the supplied data
@@ -985,9 +1009,87 @@ namespace Amazon.Runtime.Internal.Auth
                                                     bool doubleEncode,
                                                     out string signedHeaderNames)
         {
+            var canonicalRequest = new ValueStringBuilder(512);
+            signedHeaderNames = BuildCanonicalRequest(ref canonicalRequest,
+                                                      endpoint,
+                                                      resourcePath,
+                                                      httpMethod,
+                                                      sortedHeaders,
+                                                      canonicalQueryString,
+                                                      precomputedBodyHash,
+                                                      pathResources,
+                                                      doubleEncode);
+            return canonicalRequest.ToString();
+        }
+
+        /// <summary>
+        /// Builds the canonical request and returns the lowercase hex SHA-256 hash of it, which is all the
+        /// signature needs. The canonical request string itself is only materialized when metrics are
+        /// enabled, since it is then recorded as <see cref="Metric.CanonicalRequest"/>.
+        /// </summary>
+        internal static string CanonicalizeAndHashRequest(Uri endpoint,
+                                                          string resourcePath,
+                                                          string httpMethod,
+                                                          IDictionary<string, string> sortedHeaders,
+                                                          string canonicalQueryString,
+                                                          string precomputedBodyHash,
+                                                          IDictionary<string, string> pathResources,
+                                                          bool doubleEncode,
+                                                          RequestMetrics metrics,
+                                                          out string signedHeaderNames)
+        {
+#if NET8_0_OR_GREATER
+            if (metrics == null || !metrics.IsEnabled)
+            {
+                var builder = new ValueStringBuilder(512);
+                try
+                {
+                    signedHeaderNames = BuildCanonicalRequest(ref builder,
+                                                              endpoint,
+                                                              resourcePath,
+                                                              httpMethod,
+                                                              sortedHeaders,
+                                                              canonicalQueryString,
+                                                              precomputedBodyHash,
+                                                              pathResources,
+                                                              doubleEncode);
+                    return AWSSDKUtils.ToHex(ComputeHash(builder.AsSpan()), true);
+                }
+                finally
+                {
+                    builder.Dispose();
+                }
+            }
+#endif
+            var canonicalRequest = CanonicalizeRequestHelper(endpoint,
+                                                             resourcePath,
+                                                             httpMethod,
+                                                             sortedHeaders,
+                                                             canonicalQueryString,
+                                                             precomputedBodyHash,
+                                                             pathResources,
+                                                             doubleEncode,
+                                                             out signedHeaderNames);
+            if (metrics != null)
+                metrics.AddProperty(Metric.CanonicalRequest, canonicalRequest);
+            return AWSSDKUtils.ToHex(ComputeHash(canonicalRequest), true);
+        }
+
+        /// <summary>
+        /// Appends the canonical request to <paramref name="canonicalRequest"/> and returns the signed header names.
+        /// </summary>
+        private static string BuildCanonicalRequest(ref ValueStringBuilder canonicalRequest,
+                                                    Uri endpoint,
+                                                    string resourcePath,
+                                                    string httpMethod,
+                                                    IDictionary<string, string> sortedHeaders,
+                                                    string canonicalQueryString,
+                                                    string precomputedBodyHash,
+                                                    IDictionary<string, string> pathResources,
+                                                    bool doubleEncode)
+        {
             var namesBuilder = new ValueStringBuilder(256);
 
-            var canonicalRequest = new ValueStringBuilder(512);
             canonicalRequest.Append(httpMethod);
             canonicalRequest.Append('\n');
             canonicalRequest.Append(AWSSDKUtils.CanonicalizeResourcePathV2(endpoint, resourcePath, doubleEncode, pathResources));
@@ -1017,9 +1119,7 @@ namespace Amazon.Runtime.Internal.Auth
             else if (sortedHeaders.TryGetValue(HeaderKeys.XAmzContentSha256Header, out var contentHash))
                 canonicalRequest.Append(contentHash);
 
-            signedHeaderNames = namesBuilder.ToString();
-
-            return canonicalRequest.ToString();
+            return namesBuilder.ToString();
         }
 
         private static void AppendLowerInvariant(ref ValueStringBuilder builder, string value)
@@ -1468,25 +1568,25 @@ namespace Amazon.Runtime.Internal.Auth
 
             var canonicalQueryParams = CanonicalizeQueryParameters(parametersToCanonicalize);
 
-            var canonicalRequest = CanonicalizeRequest(request.Endpoint,
-                                                       request.ResourcePath,
-                                                       request.HttpMethod,
-                                                       sortedHeaders,
-                                                       canonicalQueryParams,
-                                                       ServicesUsingUnsignedPayload.Contains(service) ? UnsignedPayload : EmptyBodySha256,
-                                                       request.PathResources,
-                                                       request.UseDoubleEncoding);
-            if (metrics != null)
-                metrics.AddProperty(Metric.CanonicalRequest, canonicalRequest);
+            var canonicalRequestHash = CanonicalizeAndHashRequest(request.Endpoint,
+                                                                  request.ResourcePath,
+                                                                  request.HttpMethod,
+                                                                  sortedHeaders,
+                                                                  canonicalQueryParams,
+                                                                  ServicesUsingUnsignedPayload.Contains(service) ? UnsignedPayload : EmptyBodySha256,
+                                                                  request.PathResources,
+                                                                  request.UseDoubleEncoding,
+                                                                  metrics,
+                                                                  out _);
 
-            return ComputeSignature(awsAccessKeyId,
-                                    awsSecretAccessKey,
-                                    region,
-                                    signedAt,
-                                    service,
-                                    canonicalizedHeaderNames,
-                                    canonicalRequest,
-                                    metrics);
+            return ComputeSignatureFromHash(awsAccessKeyId,
+                                            awsSecretAccessKey,
+                                            region,
+                                            signedAt,
+                                            service,
+                                            canonicalizedHeaderNames,
+                                            canonicalRequestHash,
+                                            metrics);
         }
     }
 }
