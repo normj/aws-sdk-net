@@ -497,7 +497,7 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             {
                 return null;
             }
-            if (str.Any(c => c > 127))
+            if (!IsAscii(str))
             {
                 return null;
             }
@@ -508,6 +508,22 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             var r_start = str.Length - stop;
             var r_stop = str.Length - start;
             return str.Substring(r_start, r_stop - r_start);
+        }
+
+        private static bool IsAscii(string value)
+        {
+#if NET8_0_OR_GREATER
+            return System.Text.Ascii.IsValid(value);
+#else
+            foreach (var c in value)
+            {
+                if (c > 127)
+                {
+                    return false;
+                }
+            }
+            return true;
+#endif
         }
     }
 }
