@@ -113,6 +113,11 @@ namespace Amazon.Runtime.Credentials
         /// </summary>
         public AWSCredentials ResolveIdentity(IClientConfig clientConfig)
         {
+            // Cached credentials are returned without waiting on anything, so the timeout is only
+            // needed when they have to be resolved.
+            var cached = TryGetCachedIdentity(clientConfig);
+            if (cached != null) return cached;
+
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(35));
             return ResolveIdentity(clientConfig, cts.Token);
         }
@@ -130,15 +135,62 @@ namespace Amazon.Runtime.Credentials
             return InternalGetCredentials(cancellationToken);
         }
 
-        async Task<BaseIdentity> IIdentityResolver.ResolveIdentityAsync(IClientConfig clientConfig, CancellationToken cancellationToken) =>
-            await ResolveIdentityAsync(clientConfig, cancellationToken).ConfigureAwait(false);
+        Task<BaseIdentity> IIdentityResolver.ResolveIdentityAsync(IClientConfig clientConfig, CancellationToken cancellationToken)
+        {
+            var cached = TryGetCachedIdentityForAsync(clientConfig);
+            if (cached != null) return Task.FromResult<BaseIdentity>(cached);
 
-        public async Task<AWSCredentials> ResolveIdentityAsync(IClientConfig clientConfig, CancellationToken cancellationToken = default)
+            return ResolveBaseIdentityAsync(clientConfig, cancellationToken);
+        }
+
+        private async Task<BaseIdentity> ResolveBaseIdentityAsync(IClientConfig clientConfig, CancellationToken cancellationToken) =>
+            await ResolveIdentityCoreAsync(clientConfig, cancellationToken).ConfigureAwait(false);
+
+        public Task<AWSCredentials> ResolveIdentityAsync(IClientConfig clientConfig, CancellationToken cancellationToken = default)
+        {
+            var cached = TryGetCachedIdentityForAsync(clientConfig);
+            if (cached != null) return Task.FromResult(cached);
+
+            return ResolveIdentityCoreAsync(clientConfig, cancellationToken);
+        }
+
+        private async Task<AWSCredentials> ResolveIdentityCoreAsync(IClientConfig clientConfig, CancellationToken cancellationToken)
         {
             var profileCredentials = await _cachedProfileCredentialResolver.TryResolveCredentialsAsync(clientConfig, cancellationToken).ConfigureAwait(false);
             if (profileCredentials != null) return profileCredentials;
 
             return await InternalGetCredentialsAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Returns the credentials that resolving the identity for <paramref name="clientConfig"/> would return
+        /// from a cache without waiting on a lock, or null when they have to be resolved. Mirrors the lock-free
+        /// fast paths of the full resolution: the client's profile when it names one, otherwise the default chain.
+        /// </summary>
+        private AWSCredentials TryGetCachedIdentity(IClientConfig clientConfig)
+        {
+            var profileCredentials = _cachedProfileCredentialResolver.TryGetCachedCredentials(clientConfig, out var usesProfile);
+            if (usesProfile) return profileCredentials;
+
+            return TryGetCachedCredentials();
+        }
+
+        /// <summary>
+        /// <see cref="TryGetCachedIdentity"/> for the async entry points, which must report any exception through
+        /// the returned task rather than throw it. Returns null on an exception so the caller takes the full async
+        /// path, which repeats the same checks and faults its task with the same exception.
+        /// </summary>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "The full async path rethrows the exception through its task.")]
+        private AWSCredentials TryGetCachedIdentityForAsync(IClientConfig clientConfig)
+        {
+            try
+            {
+                return TryGetCachedIdentity(clientConfig);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>

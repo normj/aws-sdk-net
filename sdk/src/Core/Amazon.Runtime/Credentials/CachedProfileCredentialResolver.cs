@@ -121,6 +121,26 @@ namespace Amazon.Runtime.Credentials
         }
 
         /// <summary>
+        /// Returns the valid cached credentials for the profile <paramref name="clientConfig"/> names without
+        /// waiting on a lock, or null when they have to be resolved: the same check as the fast path of
+        /// <see cref="TryResolveCredentials"/>. <paramref name="usesProfile"/> is false when the config names no
+        /// profile, which is when <see cref="TryResolveCredentials"/> returns null.
+        /// </summary>
+        public AWSCredentials TryGetCachedCredentials(IClientConfig clientConfig, out bool usesProfile)
+        {
+            var profile = clientConfig?.Profile;
+            if (string.IsNullOrEmpty(profile?.Name))
+            {
+                usesProfile = false;
+                return null;
+            }
+
+            usesProfile = true;
+            var key = (profile.Name, profile.Location ?? string.Empty);
+            return GetOrCreateEntry(key).GetIfValid();
+        }
+
+        /// <summary>
         /// Returns the <see cref="ProfileCredentialEntry"/> for the given key, creating it if absent.
         /// The entry owns the per-key <see cref="SemaphoreSlim"/> and the volatile cached credentials.
         /// </summary>
