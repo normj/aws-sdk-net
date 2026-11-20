@@ -88,7 +88,10 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         {
             try
             {
-                if (IsArn(arnString))
+                // Parse requires the first token to be exactly "arn", so an input without an ordinal
+                // "arn:" prefix can never parse. Rejecting it here skips the culture-sensitive
+                // comparison in IsArn for the common case, a plain name such as a bucket or table.
+                if (arnString != null && arnString.StartsWith("arn:", StringComparison.Ordinal) && IsArn(arnString))
                 {
                     arn = Parse(arnString);
                     return true;
@@ -117,31 +120,37 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
 
             const string malformedErrorMessage = "ARN is in incorrect format. ARN format is: arn:<partition>:<service>:<region>:<account-id>:<resource>";
 
-            var tokens = arnString.Split(new char[] { ':' }, 6);
-            if (tokens.Length != 6)
+            // Equivalent to arnString.Split(':', 6) without allocating the token array: find the
+            // first five colons; whatever follows the fifth is the resource.
+            int c0 = arnString.IndexOf(':');
+            int c1 = c0 < 0 ? -1 : arnString.IndexOf(':', c0 + 1);
+            int c2 = c1 < 0 ? -1 : arnString.IndexOf(':', c1 + 1);
+            int c3 = c2 < 0 ? -1 : arnString.IndexOf(':', c2 + 1);
+            int c4 = c3 < 0 ? -1 : arnString.IndexOf(':', c3 + 1);
+            if (c4 < 0)
             {
                 throw new ArgumentException(malformedErrorMessage);
             }
 
-            if (tokens[0] != "arn")
+            if (c0 != 3 || string.CompareOrdinal(arnString, 0, "arn", 0, 3) != 0)
             {
                 throw new ArgumentException(malformedErrorMessage);
             }
 
-            string partition = tokens[1];
+            string partition = arnString.Substring(c0 + 1, c1 - c0 - 1);
             if (string.IsNullOrEmpty(partition))
             {
                 throw new ArgumentException("Malformed ARN - no partition specified");
             }
-            string service = tokens[2];
+            string service = arnString.Substring(c1 + 1, c2 - c1 - 1);
             if (string.IsNullOrEmpty(service))
             {
                 throw new ArgumentException("Malformed ARN - no service specified");
             }
 
-            string region = tokens[3];
-            string accountId = tokens[4];
-            string resource = tokens[5];
+            string region = arnString.Substring(c2 + 1, c3 - c2 - 1);
+            string accountId = arnString.Substring(c3 + 1, c4 - c3 - 1);
+            string resource = arnString.Substring(c4 + 1);
             if (string.IsNullOrEmpty(resource))
             {
                 throw new ArgumentException("Malformed ARN - no resource specified");
@@ -153,8 +162,38 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 service = service,
                 region = region,
                 accountId = accountId,
-                resourceId = resource.Split(new[] { ':', '/' }).ToList()
+                resourceId = SplitResource(resource)
             };
+        }
+
+        /// <summary>
+        /// Equivalent to <c>resource.Split(new[] { ':', '/' }).ToList()</c>, including empty entries,
+        /// without the intermediate array. The list is created at exactly the size ToList would give it.
+        /// </summary>
+        private static List<string> SplitResource(string resource)
+        {
+            int count = 1;
+            foreach (var ch in resource)
+            {
+                if (ch == ':' || ch == '/')
+                {
+                    count++;
+                }
+            }
+
+            var result = new List<string>(count);
+            int start = 0;
+            for (int i = 0; i < resource.Length; i++)
+            {
+                var ch = resource[i];
+                if (ch == ':' || ch == '/')
+                {
+                    result.Add(resource.Substring(start, i - start));
+                    start = i + 1;
+                }
+            }
+            result.Add(resource.Substring(start));
+            return result;
         }
     }
 }
