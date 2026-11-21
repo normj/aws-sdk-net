@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for services whose endpoint rules carry auth schemes (for example Amazon S3): the auth schemes of the resolved endpoint are read without LINQ on every request."
+    ]
+  }
+}
