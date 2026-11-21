@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations by creating the request metrics lock and error list only when they are first used."
+    ]
+  }
+}
