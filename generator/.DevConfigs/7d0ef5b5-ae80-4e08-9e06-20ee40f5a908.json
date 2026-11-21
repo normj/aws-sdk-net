@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time and allocations when endpoint rules build the JSON attributes of a resolved endpoint on .NET 8 and later."
+    ]
+  }
+}
