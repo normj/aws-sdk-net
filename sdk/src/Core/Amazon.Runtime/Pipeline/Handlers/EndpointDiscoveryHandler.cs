@@ -28,6 +28,24 @@ namespace Amazon.Runtime.Internal
         //The status code returned from a service request when an invalid endpoint is used.
         private const int INVALID_ENDPOINT_EXCEPTION_STATUSCODE = 421;
 
+        // The discovered endpoint comes from the client's endpoint cache, so consecutive requests almost always use
+        // the same address string. The last address and the Uri parsed from it are kept so an unchanged address is
+        // not parsed again. Uri instances are immutable, so sharing one between requests, clients and threads is
+        // safe; the entry is replaced as a whole.
+        private static DiscoveredEndpointUri _lastDiscoveredEndpointUri;
+
+        private sealed class DiscoveredEndpointUri
+        {
+            internal DiscoveredEndpointUri(string address, Uri uri)
+            {
+                Address = address;
+                Uri = uri;
+            }
+
+            internal string Address { get; }
+            internal Uri Uri { get; }
+        }
+
         /// <summary>
         /// Calls pre invoke logic before calling the next handler 
         /// in the pipeline.
@@ -136,10 +154,27 @@ namespace Amazon.Runtime.Internal
                     }
 
                     //Only the first endpoint should be used currently
-                    requestContext.Request.Endpoint = new Uri(endpoint.Address);
+                    requestContext.Request.Endpoint = GetDiscoveredEndpointUri(endpoint.Address);
                     break;
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns <c>new Uri(address)</c>, or the Uri parsed for the previous request when <paramref name="address"/>
+        /// is the same string.
+        /// </summary>
+        internal static Uri GetDiscoveredEndpointUri(string address)
+        {
+            var cached = System.Threading.Volatile.Read(ref _lastDiscoveredEndpointUri);
+            if (cached != null && string.Equals(cached.Address, address, StringComparison.Ordinal))
+            {
+                return cached.Uri;
+            }
+
+            var uri = new Uri(address);
+            System.Threading.Volatile.Write(ref _lastDiscoveredEndpointUri, new DiscoveredEndpointUri(address, uri));
+            return uri;
         }
 
         private static IEnumerable<DiscoveryEndpointBase> ProcessEndpointDiscovery(IRequestContext requestContext, bool evictCacheKey, Uri evictUri, ImmutableCredentials credentials)

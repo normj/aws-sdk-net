@@ -230,18 +230,23 @@ namespace Amazon.Runtime.Internal
             return null;
         }
 
-        private static string BuildEndpointDiscoveryCacheKey(EndpointOperationContextBase context)
+        internal static string BuildEndpointDiscoveryCacheKey(EndpointOperationContextBase context)
         {
-            var cacheKeyBuilder = new StringBuilder();
-            cacheKeyBuilder.Append(context.CustomerCredentials);
+            var customerCredentials = context.CustomerCredentials;
             var identifiers = context.EndpointDiscoveryData.Identifiers;
-            if (identifiers != null && identifiers.Count > 0)
+            if (identifiers == null || identifiers.Count == 0)
             {
-                cacheKeyBuilder.Append(string.Format(CultureInfo.InvariantCulture, ".{0}", context.OperationName));
-                foreach (var identifier in identifiers)
-                {
-                    cacheKeyBuilder.Append(string.Format(CultureInfo.InvariantCulture, ".{0}", identifier.Value));
-                }
+                // The key is just the credentials string (empty when null), so it is returned as is instead of
+                // being copied through a StringBuilder.
+                return customerCredentials ?? string.Empty;
+            }
+
+            var cacheKeyBuilder = new StringBuilder();
+            cacheKeyBuilder.Append(customerCredentials);
+            cacheKeyBuilder.Append('.').Append(context.OperationName);
+            foreach (var identifier in identifiers)
+            {
+                cacheKeyBuilder.Append('.').Append(identifier.Value);
             }
 
             return cacheKeyBuilder.ToString();
