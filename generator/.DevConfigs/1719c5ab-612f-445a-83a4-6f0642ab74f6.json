@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations in CachingWrapperStream, used for error responses and response logging, by caching read bytes without a temporary array per read."
+    ]
+  }
+}
