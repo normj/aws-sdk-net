@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of reading UnmarshallerContext.ResponseBody by decoding the cached response bytes without copying them to a new array first on .NET 8 and later."
+    ]
+  }
+}
