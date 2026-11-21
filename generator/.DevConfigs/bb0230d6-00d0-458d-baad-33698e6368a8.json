@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved the performance of clock skew recording on every response: the Date header in its standard form is parsed without DateTime.TryParseExact."
+    ]
+  }
+}

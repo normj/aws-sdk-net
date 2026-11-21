@@ -108,6 +108,11 @@ namespace Amazon.Runtime.Internal
         /// <returns>True if the header was present and parseable; otherwise false.</returns>
         internal static bool TryParseDateHeader(string dateHeaderValue, out DateTime serverTimeUtc)
         {
+            if (TryParseCanonicalGmtDate(dateHeaderValue, out serverTimeUtc))
+            {
+                return true;
+            }
+
             if (!string.IsNullOrEmpty(dateHeaderValue) &&
                 DateTime.TryParseExact(
                     dateHeaderValue,
@@ -121,6 +126,83 @@ namespace Amazon.Runtime.Internal
 
             serverTimeUtc = DateTime.MinValue;
             return false;
+        }
+
+        private static readonly string[] CanonicalDayNames = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        private static readonly string[] CanonicalMonthNames = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+        /// <summary>
+        /// Parses a <c>Date</c> header in the exact form servers send, <c>Sun, 06 Nov 1994 08:49:37 GMT</c>,
+        /// without the general <see cref="DateTime.TryParseExact(string, string, IFormatProvider, DateTimeStyles, out DateTime)"/>
+        /// machinery. Accepts only that canonical spelling (two-digit day, ASCII digits, the invariant
+        /// abbreviated day and month names in their usual case, a day name that matches the date) and returns
+        /// false for anything else, which the caller then hands to <c>TryParseExact</c>. For every input it
+        /// accepts, the result equals what <c>TryParseExact</c> with <see cref="AWSSDKUtils.GMTDateFormat"/>
+        /// returns: the same UTC instant with <see cref="DateTimeKind.Utc"/>.
+        /// </summary>
+        internal static bool TryParseCanonicalGmtDate(string value, out DateTime serverTimeUtc)
+        {
+            serverTimeUtc = DateTime.MinValue;
+
+            // "ddd, dd MMM yyyy HH:mm:ss GMT" is always 29 characters.
+            if (value == null || value.Length != 29 ||
+                value[3] != ',' || value[4] != ' ' || value[7] != ' ' || value[11] != ' ' || value[16] != ' ' ||
+                value[19] != ':' || value[22] != ':' || value[25] != ' ' ||
+                value[26] != 'G' || value[27] != 'M' || value[28] != 'T')
+            {
+                return false;
+            }
+
+            if (!TryParseDigits(value, 5, 2, out var day) ||
+                !TryParseDigits(value, 12, 4, out var year) ||
+                !TryParseDigits(value, 17, 2, out var hour) ||
+                !TryParseDigits(value, 20, 2, out var minute) ||
+                !TryParseDigits(value, 23, 2, out var second))
+            {
+                return false;
+            }
+
+            var month = 0;
+            for (var i = 0; i < CanonicalMonthNames.Length; i++)
+            {
+                if (string.CompareOrdinal(value, 8, CanonicalMonthNames[i], 0, 3) == 0)
+                {
+                    month = i + 1;
+                    break;
+                }
+            }
+
+            if (month == 0 || year < 1 || day < 1 || day > DateTime.DaysInMonth(year, month) ||
+                hour > 23 || minute > 59 || second > 59)
+            {
+                return false;
+            }
+
+            var parsed = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc);
+            if (string.CompareOrdinal(value, 0, CanonicalDayNames[(int)parsed.DayOfWeek], 0, 3) != 0)
+            {
+                return false;
+            }
+
+            serverTimeUtc = parsed;
+            return true;
+        }
+
+        private static bool TryParseDigits(string value, int start, int count, out int result)
+        {
+            result = 0;
+            for (var i = start; i < start + count; i++)
+            {
+                var digit = value[i] - '0';
+                if ((uint)digit > 9)
+                {
+                    return false;
+                }
+
+                result = result * 10 + digit;
+            }
+
+            return true;
         }
     }
 }
