@@ -691,9 +691,11 @@ namespace Amazon.Runtime.Internal
             if (requestContext.Request.SignatureVersion == SignatureVersion.SigV4a)
                 requestContext.UserAgentDetails.AddFeature(UserAgentFeatureId.SIGV4A_SIGNING);
 
-            var originalRequest = (IAmazonWebServiceRequest)requestContext.OriginalRequest;
-
-            requestContext.UserAgentDetails.MergeFrom(originalRequest.UserAgentDetails);
+            // A request object whose user agent details were never accessed has nothing to merge, so skip
+            // creating them just to find them empty.
+            var requestUserAgentDetails = requestContext.OriginalRequest.UserAgentDetailsIfCreated;
+            if (requestUserAgentDetails != null)
+                requestContext.UserAgentDetails.MergeFrom(requestUserAgentDetails);
 
             var metricsUserAgent = GetUserAgent(requestContext.UserAgentDetails);
             Logger.DebugFormat("User-Agent Header: {0}", metricsUserAgent);
