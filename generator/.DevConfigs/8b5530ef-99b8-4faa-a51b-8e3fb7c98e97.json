@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations by creating the request header dictionary with room for the headers a signed request carries."
+    ]
+  }
+}
