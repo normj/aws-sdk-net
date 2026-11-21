@@ -281,6 +281,25 @@ namespace Amazon.Runtime
             return tempState.Credentials;
         }
 
+        /// <summary>
+        /// Returns the current credentials without allocating a task when <see cref="GetCredentialsAsync()"/> would return
+        /// them without waiting: they are not expired, and either no preemptive refresh is due or one is already
+        /// running. Returns false otherwise, and the caller awaits <see cref="GetCredentialsAsync()"/>, which refreshes.
+        /// </summary>
+        internal override sealed bool TryGetCredentialsWithoutTask(out ImmutableCredentials credentials)
+        {
+            // The same read-only check that GetCredentials and GetCredentialsAsync make before taking the semaphore.
+            var tempState = currentState;
+            if (IsExpired(tempState) || (currentLoadState != CredentialsLoadState.Loading && IsPreemptExpiryWindow(tempState)))
+            {
+                credentials = null;
+                return false;
+            }
+
+            credentials = tempState.Credentials;
+            return true;
+        }
+
         private async Task BackgroundCredentialsRefreshAsync()
         {
             // NOTICE: Before modifying any of the logic read the comments in the synchronous GetCredentials method to 

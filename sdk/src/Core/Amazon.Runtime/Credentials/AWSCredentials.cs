@@ -50,5 +50,30 @@ namespace Amazon.Runtime
         {
             return System.Threading.Tasks.Task.FromResult<ImmutableCredentials>(this.GetCredentials());
         }
+
+        /// <summary>
+        /// Gets the credentials without allocating a task, when that returns exactly what awaiting
+        /// <see cref="GetCredentialsAsync"/> would. Returns false when the caller must await
+        /// <see cref="GetCredentialsAsync"/> instead.
+        /// </summary>
+        /// <remarks>
+        /// The base implementation returns true only for the SDK's own credential types that use the default
+        /// <see cref="GetCredentialsAsync"/> above, which is <see cref="GetCredentials"/> in a completed task. The exact
+        /// type is checked because a derived class can override <see cref="GetCredentialsAsync"/>.
+        /// </remarks>
+        internal virtual bool TryGetCredentialsWithoutTask(out ImmutableCredentials credentials)
+        {
+            var type = GetType();
+            if (type == typeof(BasicAWSCredentials) ||
+                type == typeof(SessionAWSCredentials) ||
+                type == typeof(EnvironmentVariablesAWSCredentials))
+            {
+                credentials = GetCredentials();
+                return true;
+            }
+
+            credentials = null;
+            return false;
+        }
     }
 }
