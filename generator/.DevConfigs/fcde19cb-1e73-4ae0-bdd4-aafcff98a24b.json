@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced CPU time and allocations for failed requests when tracing is not configured, by not building exception details (including the stack trace string) for the no-op trace span."
+    ]
+  }
+}
