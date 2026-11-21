@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when creating request objects by creating their user agent details and event lock only when they are first used."
+    ]
+  }
+}

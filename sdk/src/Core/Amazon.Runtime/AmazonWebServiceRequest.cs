@@ -23,23 +23,56 @@ namespace Amazon.Runtime
     /// </summary>
     public abstract partial class AmazonWebServiceRequest : Amazon.Runtime.Internal.IAmazonWebServiceRequest
     {
-        private readonly object _lock = new object();
+        // The event lock and the user agent details are created on first use. Applications usually create a
+        // new request object for every call, and most never add a BeforeRequestEvent handler or a request-level
+        // user agent component, so neither is needed.
+        private object _lock;
+        private UserAgentDetails _userAgentDetails;
 
         internal RequestEventHandler mBeforeRequestEvent;
-        UserAgentDetails Amazon.Runtime.Internal.IAmazonWebServiceRequest.UserAgentDetails { get; } = new UserAgentDetails();
+
+        // Same reason as the existing CA1033 suppression for RequestState: an internal interface member,
+        // previously an auto-property, which the analyzer did not flag.
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1033:Interface methods should be callable by child types")]
+        UserAgentDetails Amazon.Runtime.Internal.IAmazonWebServiceRequest.UserAgentDetails
+        {
+            get
+            {
+                // Every caller must see the same instance, so only the first one created is published.
+                return System.Threading.Volatile.Read(ref _userAgentDetails)
+                    ?? System.Threading.Interlocked.CompareExchange(ref _userAgentDetails, new UserAgentDetails(), null)
+                    ?? _userAgentDetails;
+            }
+        }
+
+        /// <summary>
+        /// The request's user agent details, or null if nothing has accessed them yet (so there is nothing in them).
+        /// </summary>
+        internal UserAgentDetails UserAgentDetailsIfCreated => System.Threading.Volatile.Read(ref _userAgentDetails);
+
+        private object Lock
+        {
+            get
+            {
+                // Every caller must lock the same object, so only the first one created is published.
+                return System.Threading.Volatile.Read(ref _lock)
+                    ?? System.Threading.Interlocked.CompareExchange(ref _lock, new object(), null)
+                    ?? _lock;
+            }
+        }
 
         internal event RequestEventHandler BeforeRequestEvent
         {
             add
             {
-                lock (_lock)
+                lock (Lock)
                 {
                     mBeforeRequestEvent += value;
                 }
             }
             remove
             {
-                lock (_lock)
+                lock (Lock)
                 {
                     mBeforeRequestEvent -= value;
                 }
