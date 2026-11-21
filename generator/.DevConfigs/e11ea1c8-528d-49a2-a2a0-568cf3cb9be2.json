@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations by creating a request's sub-resource, path-resource and trailing-header dictionaries only when they are first used."
+    ]
+  }
+}

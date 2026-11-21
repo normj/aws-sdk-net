@@ -30,5 +30,40 @@ namespace Amazon.Runtime.Internal
                 ? defaultRequest.EndpointString
                 : request.Endpoint.ToString();
         }
+
+        /// <summary>
+        /// Returns <see cref="IRequest.SubResources"/> without creating it on a <see cref="DefaultRequest"/> that
+        /// has never used it: null means there are no sub-resources. Any other <see cref="IRequest"/>
+        /// implementation returns its property as before.
+        /// </summary>
+        internal static System.Collections.Generic.IDictionary<string, string> GetSubResourcesIfCreated(this IRequest request)
+        {
+            return request is DefaultRequest defaultRequest
+                ? defaultRequest.SubResourcesIfCreated
+                : request.SubResources;
+        }
+
+        /// <summary>
+        /// Returns <see cref="IRequest.PathResources"/> without creating it on a <see cref="DefaultRequest"/> that
+        /// has never used it: null means there are no path resources. Every consumer of path resources in the
+        /// SDK treats null and empty the same way.
+        /// </summary>
+        internal static System.Collections.Generic.IDictionary<string, string> GetPathResourcesIfCreated(this IRequest request)
+        {
+            return request is DefaultRequest defaultRequest
+                ? defaultRequest.PathResourcesIfCreated
+                : request.PathResources;
+        }
+
+        /// <summary>
+        /// Returns <see cref="IRequest.TrailingHeaders"/> without creating it on a <see cref="DefaultRequest"/> that
+        /// has never used it: null means there are no trailing headers.
+        /// </summary>
+        internal static System.Collections.Generic.IDictionary<string, string> GetTrailingHeadersIfCreated(this IRequest request)
+        {
+            return request is DefaultRequest defaultRequest
+                ? defaultRequest.TrailingHeadersIfCreated
+                : request.TrailingHeaders;
+        }
     }
 }

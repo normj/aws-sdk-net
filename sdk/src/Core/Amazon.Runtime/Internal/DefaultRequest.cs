@@ -37,9 +37,12 @@ namespace Amazon.Runtime.Internal
         readonly ParameterCollection parametersCollection;
         readonly IDictionary<string, string> parametersFacade;
         readonly IDictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> trailingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> subResources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> pathResources = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Most requests never add trailing headers, sub-resources or path resources, so these are created on
+        // first access through their properties. The SDK's own hot-path readers check whether they exist first
+        // (see RequestExtensions) instead of creating an empty dictionary just to find it empty.
+        IDictionary<string, string> trailingHeaders;
+        IDictionary<string, string> subResources;
+        IDictionary<string, string> pathResources;
         readonly List<EventStreamHeader> eventHeaders = new List<EventStreamHeader>();
 
         Uri endpoint;
@@ -205,9 +208,14 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.subResources;
+                return this.subResources ?? CreateDictionary(ref this.subResources, StringComparer.OrdinalIgnoreCase);
             }
         }
+
+        /// <summary>
+        /// The <see cref="SubResources"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> SubResourcesIfCreated => System.Threading.Volatile.Read(ref this.subResources);
 
         /// <summary>
         /// Adds a new null entry to the SubResources collection for the request
@@ -279,9 +287,14 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.pathResources;
+                return this.pathResources ?? CreateDictionary(ref this.pathResources, StringComparer.Ordinal);
             }
         }
+
+        /// <summary>
+        /// The <see cref="PathResources"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> PathResourcesIfCreated => System.Threading.Volatile.Read(ref this.pathResources);
 
         /// <summary>
         /// Adds a new entry to the PathResources collection for the request
@@ -544,7 +557,21 @@ namespace Amazon.Runtime.Internal
         /// Returns a dictionary of the trailing headers included
         /// after this request's content.
         /// </summary>
-        public IDictionary<string, string> TrailingHeaders => this.trailingHeaders;
+        public IDictionary<string, string> TrailingHeaders => this.trailingHeaders ?? CreateDictionary(ref this.trailingHeaders, StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The <see cref="TrailingHeaders"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> TrailingHeadersIfCreated => System.Threading.Volatile.Read(ref this.trailingHeaders);
+
+        /// <summary>
+        /// Creates the dictionary behind a lazily created property. If two threads race, both get the
+        /// instance that was published first, so every caller sees the same dictionary.
+        /// </summary>
+        private static IDictionary<string, string> CreateDictionary(ref IDictionary<string, string> field, StringComparer comparer)
+        {
+            return System.Threading.Interlocked.CompareExchange(ref field, new Dictionary<string, string>(comparer), null) ?? field;
+        }
 
         /// <summary>
         /// The selected compression algorithm to be used to compress the payload of the request.
