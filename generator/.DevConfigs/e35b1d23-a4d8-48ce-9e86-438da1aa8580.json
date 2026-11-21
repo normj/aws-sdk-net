@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved the performance of building the request URL for REST requests: AWSSDKUtils.ResolveResourcePathV2 resolves and encodes the resource path in one pass instead of building intermediate segment lists and strings."
+    ]
+  }
+}
