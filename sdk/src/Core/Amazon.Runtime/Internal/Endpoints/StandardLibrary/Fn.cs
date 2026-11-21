@@ -151,12 +151,52 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         public static Arn ParseArn(string arn)
         {
+            // Rules parse the same ARNs on every request (an S3 access point, a DynamoDB table ARN), so
+            // successful parses are kept by ARN text and each caller gets its own copy. Arn.Parse is
+            // deterministic for a given string, but Arn.IsArn is culture-sensitive, so it still runs on
+            // every call. Strings without an ordinal "arn:" prefix skip the cache and take the original path.
+            Arn cached;
+            if (arn != null &&
+                arn.StartsWith("arn:", StringComparison.Ordinal) &&
+                _parsedArnCache.TryGetValue(arn, out cached))
+            {
+                return Arn.IsArn(arn) ? CopyArn(cached) : null;
+            }
+
             Arn parsedArn;
             if (!Arn.TryParse(arn, out parsedArn))
             {
                 return null;
             }
+
+            if (arn.Length <= MaxCachedArnLength &&
+                arn.StartsWith("arn:", StringComparison.Ordinal) &&
+                System.Threading.Volatile.Read(ref _parsedArnCacheCount) < MaxCachedArns &&
+                _parsedArnCache.TryAdd(arn, CopyArn(parsedArn)))
+            {
+                System.Threading.Interlocked.Increment(ref _parsedArnCacheCount);
+            }
+
             return parsedArn;
+        }
+
+        private const int MaxCachedArns = 256;
+        private const int MaxCachedArnLength = 2048;
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Arn> _parsedArnCache =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, Arn>(StringComparer.Ordinal);
+        private static int _parsedArnCacheCount;
+
+        // Builds the same shape Arn.Parse returns: the five properties in the same order and a new resourceId list.
+        private static Arn CopyArn(Arn source)
+        {
+            return new Arn
+            {
+                partition = source.partition,
+                service = source.service,
+                region = source.region,
+                accountId = source.accountId,
+                resourceId = new List<string>(source.resourceId)
+            };
         }
 
         /// <summary>
