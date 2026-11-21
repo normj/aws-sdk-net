@@ -969,14 +969,72 @@ namespace Amazon.Runtime.Internal.Transform
         public DateTime Unmarshall(JsonUnmarshallerContext context, ref StreamingUtf8JsonReader reader)
         {
             context.Read(ref reader);
-            if (context.CurrentTokenType == JsonTokenType.Number && reader.TryGetDecimal(out decimal seconds))
+            if (context.CurrentTokenType == JsonTokenType.Number)
             {
-                return AWSSDKUtils.ConvertFromUnixDecimalEpochSeconds(seconds);
+#if NET8_0_OR_GREATER
+                if (TryParseEpochMilliseconds(reader.ValueSpan, out long milliseconds))
+                {
+                    return AWSSDKUtils.EPOCH_START.AddMilliseconds(milliseconds);
+                }
+#endif
+                if (reader.TryGetDecimal(out decimal seconds))
+                {
+                    return AWSSDKUtils.ConvertFromUnixDecimalEpochSeconds(seconds);
+                }
             }
 
             string text = context.ReadText(ref reader);
             return UnmarshallInternal(text, treatAsNullable: false).Value;
         }
+
+#if NET8_0_OR_GREATER
+        /// <summary>
+        /// Parses a JSON number of the form <c>digits[.digits]</c> (at most 12 integer digits and 15
+        /// fraction digits) as epoch seconds and returns whole milliseconds, truncating any further
+        /// fraction digits. Within those limits the decimal value is exact, so the result equals
+        /// <c>(long)(seconds * 1000)</c> in <see cref="AWSSDKUtils.ConvertFromUnixDecimalEpochSeconds"/>.
+        /// Anything else (a sign, an exponent, more digits) returns false for the decimal path.
+        /// </summary>
+        internal static bool TryParseEpochMilliseconds(ReadOnlySpan<byte> number, out long milliseconds)
+        {
+            milliseconds = 0;
+            int i = 0;
+            long whole = 0;
+            while (i < number.Length && (uint)(number[i] - '0') <= 9)
+            {
+                whole = whole * 10 + (number[i] - '0');
+                i++;
+            }
+
+            if (i == 0 || i > 12)
+                return false;
+
+            long fraction = 0;
+            if (i < number.Length)
+            {
+                if (number[i] != '.')
+                    return false;
+
+                int fractionStart = ++i;
+                while (i < number.Length && (uint)(number[i] - '0') <= 9)
+                {
+                    if (i - fractionStart < 3)
+                        fraction = fraction * 10 + (number[i] - '0');
+                    i++;
+                }
+
+                int fractionDigits = i - fractionStart;
+                if (fractionDigits == 0 || fractionDigits > 15 || i != number.Length)
+                    return false;
+
+                for (int d = fractionDigits; d < 3; d++)
+                    fraction *= 10;
+            }
+
+            milliseconds = whole * 1000 + fraction;
+            return true;
+        }
+#endif
 
         /// <summary>
         ///  Unmarshalls given string as a DateTime. Handles cases where we want to unmarshall 
@@ -1040,9 +1098,18 @@ namespace Amazon.Runtime.Internal.Transform
         public DateTime? Unmarshall(JsonUnmarshallerContext context, ref StreamingUtf8JsonReader reader)
         {
             context.Read(ref reader);
-            if (context.CurrentTokenType == JsonTokenType.Number && reader.TryGetDecimal(out decimal seconds))
+            if (context.CurrentTokenType == JsonTokenType.Number)
             {
-                return AWSSDKUtils.ConvertFromUnixDecimalEpochSeconds(seconds);
+#if NET8_0_OR_GREATER
+                if (DateTimeUnmarshaller.TryParseEpochMilliseconds(reader.ValueSpan, out long milliseconds))
+                {
+                    return AWSSDKUtils.EPOCH_START.AddMilliseconds(milliseconds);
+                }
+#endif
+                if (reader.TryGetDecimal(out decimal seconds))
+                {
+                    return AWSSDKUtils.ConvertFromUnixDecimalEpochSeconds(seconds);
+                }
             }
 
             string text = context.ReadText(ref reader);
