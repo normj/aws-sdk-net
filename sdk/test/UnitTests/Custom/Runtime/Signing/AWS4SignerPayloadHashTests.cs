@@ -53,7 +53,7 @@ namespace AWSSDK.UnitTests
                 var hash = AWS4Signer.SetRequestBodyHash(request, true, "STREAMING", 80);
 
                 Assert.AreEqual(Reference(content), hash, "length " + length);
-                Assert.AreEqual(hash, request.Headers[HeaderKeys.XAmzContentSha256Header]);
+                Assert.AreEqual(hash, request.Headers[Amazon.Util.HeaderKeys.XAmzContentSha256Header]);
                 Assert.AreEqual(64, hash.Length);
             }
         }
@@ -65,7 +65,7 @@ namespace AWSSDK.UnitTests
         {
             var empty = NewRequest(new byte[0]);
             Assert.AreEqual(Reference(new byte[0]), AWS4Signer.SetRequestBodyHash(empty, true, "STREAMING", 80));
-            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", empty.Headers[HeaderKeys.XAmzContentSha256Header]);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", empty.Headers[Amazon.Util.HeaderKeys.XAmzContentSha256Header]);
 
             // No Content: the form-encoded parameters are hashed.
             var form = NewRequest(null);
@@ -75,7 +75,7 @@ namespace AWSSDK.UnitTests
             Assert.AreEqual(Reference(Encoding.UTF8.GetBytes("Action=GetCallerIdentity&Version=2011-06-15")), hash);
 
             // Same request hashed twice (a retry) gives the same value.
-            form.Headers.Remove(HeaderKeys.XAmzContentSha256Header);
+            form.Headers.Remove(Amazon.Util.HeaderKeys.XAmzContentSha256Header);
             Assert.AreEqual(hash, AWS4Signer.SetRequestBodyHash(form, true, "STREAMING", 80));
         }
 

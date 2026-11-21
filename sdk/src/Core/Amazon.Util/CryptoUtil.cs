@@ -40,6 +40,17 @@ namespace Amazon.Util
             get { return util; }
         }
 
+#if NET10_0_OR_GREATER
+        /// <summary>
+        /// Lowercase hex SHA-256 of <paramref name="data"/>, computed with the same per-thread
+        /// SHA-256 instance as <see cref="ICryptoUtil.ComputeSHA256Hash(byte[])"/>.
+        /// </summary>
+        internal static string ComputeSHA256HashHexLower(ReadOnlySpan<byte> data)
+        {
+            return CryptoUtil.ComputeSHA256HashHexLower(data);
+        }
+#endif
+
         /// <summary>
         /// Returns a new instance of the specified hashing algorithm
         /// </summary>
@@ -170,6 +181,19 @@ namespace Amazon.Util
             {
                 return SHA256HashAlgorithmInstance.ComputeHash(data);
             }
+
+#if NET10_0_OR_GREATER
+            /// <summary>
+            /// Returns the lowercase hex SHA-256 of <paramref name="data"/>, the same characters as
+            /// <c>AWSSDKUtils.ToHex(ComputeSHA256Hash(data), true)</c>, without allocating the hash array.
+            /// </summary>
+            internal static string ComputeSHA256HashHexLower(ReadOnlySpan<byte> data)
+            {
+                Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+                SHA256HashAlgorithmInstance.TryComputeHash(data, hash, out _);
+                return Convert.ToHexStringLower(hash);
+            }
+#endif
 
             /// <summary>
             /// Computes a SHA256 hash
