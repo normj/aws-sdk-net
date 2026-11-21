@@ -495,16 +495,19 @@ namespace Amazon.Runtime
             // should use SubResources instead of appending them to the resource path with 
             // query string delimiters during request marshalling.
 
+            // The builder is created only when there is something to append; most requests have
+            // neither sub-resources nor query string parameters.
             var delim = "?";
-            var sb = new StringBuilder();
+            StringBuilder sb = null;
 
             if (internalRequest.SubResources?.Count > 0)
             {
+                sb = new StringBuilder();
                 foreach (var subResource in internalRequest.SubResources)
                 {
-                    sb.AppendFormat("{0}{1}", delim, subResource.Key);
+                    sb.Append(delim).Append(subResource.Key);
                     if (subResource.Value != null)
-                        sb.AppendFormat("={0}", subResource.Value);
+                        sb.Append('=').Append(subResource.Value);
                     delim = "&";
                 }
             }
@@ -512,10 +515,12 @@ namespace Amazon.Runtime
             if (internalRequest.UseQueryString && internalRequest.Parameters?.Count > 0)
             {
                 var queryString = AWSSDKUtils.GetParametersAsString(internalRequest);
-                sb.AppendFormat("{0}{1}", delim, queryString);
+                if (sb == null)
+                    sb = new StringBuilder();
+                sb.Append(delim).Append(queryString);
             }
 
-            var parameterizedPath = string.Concat(resourcePath, sb);
+            var parameterizedPath = sb == null ? resourcePath : string.Concat(resourcePath, sb);
             var hasSlash = url.AbsoluteUri.EndsWith("/", StringComparison.Ordinal) || parameterizedPath.StartsWith("/", StringComparison.Ordinal);
 
             var strUri = hasSlash

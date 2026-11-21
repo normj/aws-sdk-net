@@ -696,7 +696,9 @@ namespace Amazon.Runtime.Internal
             requestContext.UserAgentDetails.MergeFrom(originalRequest.UserAgentDetails);
 
             var metricsUserAgent = GetUserAgent(requestContext.UserAgentDetails);
-            Logger.DebugFormat("User-Agent Header: {0}", metricsUserAgent);
+            // Skip the params array when the SDK logger has no debug-enabled adaptor.
+            if (!(Logger is Amazon.Runtime.Internal.Util.Logger sdkLogger) || sdkLogger.IsEnabled(Amazon.Runtime.Logging.SdkLogLevel.Debug))
+                Logger.DebugFormat("User-Agent Header: {0}", metricsUserAgent);
 
             if (requestContext.ClientConfig.UseAlternateUserAgentHeader)
             {
