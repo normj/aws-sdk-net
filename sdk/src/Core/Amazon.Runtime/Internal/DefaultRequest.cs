@@ -375,6 +375,11 @@ namespace Amazon.Runtime.Internal
                 if (this.contentStream is PooledContentStream pooledStream)
                 {
                     var memory = pooledStream.Content;
+#if NET10_0_OR_GREATER
+                    // The per-thread SHA-256 instance with a stack buffer for the hash and the vectorized hex
+                    // encoder. The one-shot SHA256.HashData creates a native hash context on every call.
+                    this.contentStreamHash = CryptoUtilFactory.ComputeSHA256HashHexLower(memory.Span);
+#else
 #if NET8_0_OR_GREATER
                     byte[] payloadHashBytes = System.Security.Cryptography.SHA256.HashData(memory.Span);
 #else
@@ -389,6 +394,7 @@ namespace Amazon.Runtime.Internal
                     }
 #endif
                     this.contentStreamHash = AWSSDKUtils.ToHex(payloadHashBytes, true);
+#endif
                 }
                 else
 #endif

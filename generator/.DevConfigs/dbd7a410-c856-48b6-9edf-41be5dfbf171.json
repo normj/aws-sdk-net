@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced the time and allocations of computing the SigV4 payload hash for in-memory request bodies on .NET 10+."
+    ]
+  }
+}

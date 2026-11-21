@@ -543,6 +543,12 @@ namespace Amazon.Runtime.Internal.Auth
             if (payloadBytes != null && payloadBytes.Length == 0)
                 return EmptyBodySha256;
 
+#if NET10_0_OR_GREATER
+            // Same per-thread SHA-256 instance, hashed into a stack buffer and hex-encoded with the
+            // vectorized BCL encoder. A null payload keeps the old path and its exception.
+            if (payloadBytes != null)
+                return CryptoUtilFactory.ComputeSHA256HashHexLower(payloadBytes);
+#endif
             return AWSSDKUtils.ToHex(CryptoUtilFactory.CryptoInstance.ComputeSHA256Hash(payloadBytes), true);
         }
 
