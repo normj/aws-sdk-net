@@ -176,7 +176,9 @@ namespace Amazon.Runtime.Internal
                 {
                     // HttpClient stops observing the token once headers arrive; abort the response on cancellation
                     // so a stalled synchronous body read doesn't block forever (aws/aws-sdk-net#4534).
-                    if (!unmarshaller.HasStreamingProperty)
+                    // A token that can never be canceled would never run the callback, so the delegate is
+                    // only created when cancellation is possible.
+                    if (!unmarshaller.HasStreamingProperty && cancellationToken.CanBeCanceled)
                         abortRegistration = cancellationToken.Register(responseContext.HttpResponse.ResponseBody.Dispose);
 
                     var readEntireResponse = _supportsResponseLogging &&

@@ -414,6 +414,29 @@ namespace Amazon.Runtime.Internal
             return false;
         }
 
+        // amz-sdk-request values for small attempt and max-attempt counts, built on first use. Strings are
+        // immutable, so sharing them across requests and clients is safe.
+        private const int SdkRequestHeaderCacheSize = 16;
+        private static readonly string[] _sdkRequestHeaderCache = new string[SdkRequestHeaderCacheSize * SdkRequestHeaderCacheSize];
+
+        internal static string GetSdkRequestHeaderValue(int attempt, int maxAttempts)
+        {
+            if (attempt < 1 || attempt > SdkRequestHeaderCacheSize || maxAttempts < 1 || maxAttempts > SdkRequestHeaderCacheSize)
+            {
+                return $"attempt={attempt}; max={maxAttempts}";
+            }
+
+            var index = (attempt - 1) * SdkRequestHeaderCacheSize + (maxAttempts - 1);
+            var value = System.Threading.Volatile.Read(ref _sdkRequestHeaderCache[index]);
+            if (value == null)
+            {
+                value = $"attempt={attempt}; max={maxAttempts}";
+                System.Threading.Volatile.Write(ref _sdkRequestHeaderCache[index], value);
+            }
+
+            return value;
+        }
+
         private void SetRetryHeaders(IRequestContext requestContext)
         {
             var request = requestContext.Request;
@@ -425,7 +448,7 @@ namespace Amazon.Runtime.Internal
             }
 
             //Update the amz-sdk-request header with the current retry index.
-            var requestPairs = $"attempt={requestContext.Retries + 1}; max={RetryPolicy.MaxRetries + 1}";
+            var requestPairs = GetSdkRequestHeaderValue(requestContext.Retries + 1, RetryPolicy.MaxRetries + 1);
 
             if (request.Headers.ContainsKey(HeaderKeys.AmzSdkRequest))
             {
