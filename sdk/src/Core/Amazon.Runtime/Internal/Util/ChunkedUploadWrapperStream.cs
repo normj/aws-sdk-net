@@ -13,6 +13,7 @@
  * permissions and limitations under the License.
  */
 using System;
+using System.Buffers;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -24,6 +25,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+#if NET8_0_OR_GREATER
+using ThirdParty.RuntimeBackports;
+#endif
 
 namespace Amazon.Runtime.Internal.Util
 {
@@ -70,6 +74,8 @@ namespace Amazon.Runtime.Internal.Util
 
         private IDictionary<string, string> _trailingHeaders;
         private string _trailingHeaderChunk;
+        // _trailingHeaderChunk encoded once with Encoding.Default, which WriteTrailingHeaders copies from.
+        private byte[] _trailingHeaderChunkBytes;
         private int _trailingHeaderPos = 0;
         private bool _trailingHeadersConsumed = true;
 
@@ -470,6 +476,14 @@ namespace Amazon.Runtime.Internal.Util
             var sortedTrailingHeaders = AWS4Signer.SortAndPruneHeaders(_trailingHeaders);
             var canonicalizedTrailingHeaders = AWS4Signer.CanonicalizeHeaders(sortedTrailingHeaders);
 
+#if NET8_0_OR_GREATER
+            // HMACSignBinary throws for a null or empty key, so that keeps the string-based path below and its exception.
+            if (HeaderSigningResult is AWS4SigningResult && _signingKey != null && _signingKey.Length > 0)
+            {
+                return ConstructV4SignedTrailersChunk(canonicalizedTrailingHeaders);
+            }
+#endif
+
             var prefix = HeaderSigningResult is AWS4aSigningResult ? V4A_TRAILING_HEADER_STRING_TO_SIGN_PREFIX : V4_TRAILING_HEADER_STRING_TO_SIGN_PREFIX;
             var chunkStringToSign =
                 prefix + "\n" +
@@ -500,6 +514,85 @@ namespace Amazon.Runtime.Internal.Util
             return chunk.ToString();
         }
 
+#if NET8_0_OR_GREATER
+        /// <summary>
+        /// SigV4 version of the end of <see cref="ConstructSignedTrailersChunk"/>. It produces the same text, but builds the
+        /// string to sign and the chunk in stack buffers, hex-encodes the hash and signature in place, and skips the
+        /// sort when there is a single trailing header.
+        /// </summary>
+        private string ConstructV4SignedTrailersChunk(string canonicalizedTrailingHeaders)
+        {
+            Span<byte> hash = stackalloc byte[32];
+
+            // "AWS4-HMAC-SHA256-TRAILER\n{date-time}\n{scope}\n{previous signature}\n{hash of the canonical trailing headers}"
+            var stringToSign = new ValueStringBuilder(stackalloc char[256]);
+            stringToSign.Append(V4_TRAILING_HEADER_STRING_TO_SIGN_PREFIX);
+            stringToSign.Append('\n');
+            stringToSign.Append(HeaderSigningResult.ISO8601DateTime);
+            stringToSign.Append('\n');
+            stringToSign.Append(HeaderSigningResult.Scope);
+            stringToSign.Append('\n');
+            stringToSign.Append(PreviousChunkSignature);
+            stringToSign.Append('\n');
+            WriteLowerHex(AWS4Signer.ComputeHash(canonicalizedTrailingHeaders), stringToSign.AppendSpan(64));
+
+            var stringToSignChars = stringToSign.AsSpan();
+            var byteCount = Encoding.UTF8.GetByteCount(stringToSignChars);
+            byte[] rented = null;
+            Span<byte> stringToSignBytes = byteCount <= 512
+                ? stackalloc byte[512]
+                : (rented = ArrayPool<byte>.Shared.Rent(byteCount));
+            try
+            {
+                var written = Encoding.UTF8.GetBytes(stringToSignChars, stringToSignBytes);
+                HMACSHA256.HashData(_signingKey, stringToSignBytes.Slice(0, written), hash);
+            }
+            finally
+            {
+                stringToSign.Dispose();
+                if (rented != null)
+                    ArrayPool<byte>.Shared.Return(rented);
+            }
+
+            // The order here must match the order of keys sent already in the X-Amz-Trailer header.
+            var chunk = new ValueStringBuilder(stackalloc char[256]);
+            if (_trailingHeaders.Count == 1)
+            {
+                foreach (var kvp in _trailingHeaders)
+                    AppendTrailingHeader(ref chunk, kvp.Key, kvp.Value);
+            }
+            else
+            {
+                foreach (var kvp in _trailingHeaders.OrderBy(kvp => kvp.Key))
+                    AppendTrailingHeader(ref chunk, kvp.Key, kvp.Value);
+            }
+            chunk.Append(TRAILING_HEADER_SIGNATURE_KEY);
+            chunk.Append(':');
+            WriteLowerHex(hash, chunk.AppendSpan(64));
+            chunk.Append(STREAM_NEWLINE);
+            chunk.Append(STREAM_NEWLINE);
+            return chunk.ToString();
+        }
+
+        private static void AppendTrailingHeader(ref ValueStringBuilder chunk, string key, string value)
+        {
+            chunk.Append(key);
+            chunk.Append(':');
+            chunk.Append(value);
+            chunk.Append(STREAM_NEWLINE);
+        }
+
+        private static void WriteLowerHex(ReadOnlySpan<byte> source, Span<char> destination)
+        {
+            const string digits = "0123456789abcdef";
+            for (int i = 0; i < source.Length; i++)
+            {
+                destination[2 * i] = digits[source[i] >> 4];
+                destination[2 * i + 1] = digits[source[i] & 0xF];
+            }
+        }
+#endif
+
         /// <summary>
         /// Copies the signed trailing headers to the output buffer
         /// </summary>
@@ -512,6 +605,7 @@ namespace Amazon.Runtime.Internal.Util
             if (string.IsNullOrEmpty(_trailingHeaderChunk))
             {
                 _trailingHeaderChunk = ConstructSignedTrailersChunk();
+                _trailingHeaderChunkBytes = Encoding.Default.GetBytes(_trailingHeaderChunk);
             }
 
             var lengthRemaining = _trailingHeaderChunk.Length - _trailingHeaderPos;
@@ -524,13 +618,13 @@ namespace Amazon.Runtime.Internal.Util
 
             if (lengthRemaining <= count)
             {
-                Buffer.BlockCopy(Encoding.Default.GetBytes(_trailingHeaderChunk), _trailingHeaderPos, buffer, offset, lengthRemaining);
+                Buffer.BlockCopy(_trailingHeaderChunkBytes, _trailingHeaderPos, buffer, offset, lengthRemaining);
                 _trailingHeadersConsumed = true;
                 return lengthRemaining;
             }
             else // the trailing headers don't entirely fit in the buffer for the current read, so use the remaining count
             {
-                Buffer.BlockCopy(Encoding.Default.GetBytes(_trailingHeaderChunk), _trailingHeaderPos, buffer, offset, count);
+                Buffer.BlockCopy(_trailingHeaderChunkBytes, _trailingHeaderPos, buffer, offset, count);
                 _trailingHeaderPos += count;
                 return count;
             }

@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when finishing signed chunked uploads with trailing headers by building the signed trailer with fewer strings and encoding it only once."
+    ]
+  }
+}
