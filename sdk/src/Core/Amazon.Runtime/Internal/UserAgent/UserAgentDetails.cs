@@ -26,13 +26,16 @@ namespace Amazon.Runtime.Internal.UserAgent
     public class UserAgentDetails
     {
         private const int MaxSizeBytes = 1024; // 1 KB size limit
-        private readonly HashSet<string> _trackedFeatureIds = new HashSet<string>();
-        private readonly HashSet<string> _userAgentCustomComponents = new HashSet<string>();
+        // Distinct values in insertion order. A request adds only a handful of each, so a list with an ordinal
+        // linear search is cheaper than hashing every value, and the lists are only allocated when first used
+        // (most request objects never add anything).
+        private List<string> _trackedFeatureIds;
+        private List<string> _userAgentCustomComponents;
 
         /// <summary>
         /// Gets the list of tracked feature IDs.
         /// </summary>
-        public IEnumerable<string> TrackedFeatureIds => _trackedFeatureIds;
+        public IEnumerable<string> TrackedFeatureIds => _trackedFeatureIds ??= new List<string>();
 
         /// <summary>
         /// Adds a component to the user-agent string. 
@@ -42,7 +45,7 @@ namespace Amazon.Runtime.Internal.UserAgent
         {
             if (!string.IsNullOrWhiteSpace(component))
             {
-                _userAgentCustomComponents.Add(component.Trim());
+                AddDistinct(ref _userAgentCustomComponents, component.Trim());
             }
         }
 
@@ -54,7 +57,7 @@ namespace Amazon.Runtime.Internal.UserAgent
         public void AddFeature(UserAgentFeatureId featureId)
         {
             if (featureId == null) return;
-            _trackedFeatureIds.Add(featureId.Value);
+            AddDistinct(ref _trackedFeatureIds, featureId.Value);
         }
 
         /// <summary>
@@ -62,7 +65,7 @@ namespace Amazon.Runtime.Internal.UserAgent
         /// </summary>
         public string GetCustomUserAgentComponents()
         {
-            return string.Join(" ", _userAgentCustomComponents);
+            return Join(" ", _userAgentCustomComponents);
         }
 
         /// <summary>
@@ -71,8 +74,8 @@ namespace Amazon.Runtime.Internal.UserAgent
         /// <returns>The final user-agent string including metrics data.</returns>
         public string GenerateUserAgentWithMetrics()
         {
-            var customComponents = string.Join(" ", _userAgentCustomComponents);
-            if (_trackedFeatureIds.Count == 0)
+            var customComponents = Join(" ", _userAgentCustomComponents);
+            if (Count(_trackedFeatureIds) == 0)
             {
                 return customComponents;
             }
@@ -85,10 +88,8 @@ namespace Amazon.Runtime.Internal.UserAgent
         /// </summary>
         internal GeneratedUserAgent CreateGeneratedUserAgent()
         {
-            var components = new string[_userAgentCustomComponents.Count];
-            _userAgentCustomComponents.CopyTo(components);
-            var featureIds = new string[_trackedFeatureIds.Count];
-            _trackedFeatureIds.CopyTo(featureIds);
+            var components = ToArray(_userAgentCustomComponents);
+            var featureIds = ToArray(_trackedFeatureIds);
             return new GeneratedUserAgent(components, featureIds, GenerateUserAgentWithMetrics());
         }
 
@@ -103,19 +104,46 @@ namespace Amazon.Runtime.Internal.UserAgent
                 SequenceEqual(_trackedFeatureIds, cached.FeatureIds);
         }
 
-        private static bool SequenceEqual(HashSet<string> set, string[] values)
+        private static bool SequenceEqual(List<string> list, string[] values)
         {
-            if (set.Count != values.Length)
+            if (Count(list) != values.Length)
                 return false;
 
-            int i = 0;
-            foreach (var item in set)
+            for (int i = 0; i < values.Length; i++)
             {
-                if (!string.Equals(item, values[i++], System.StringComparison.Ordinal))
+                if (!string.Equals(list[i], values[i], System.StringComparison.Ordinal))
                     return false;
             }
             return true;
         }
+
+        /// <summary>
+        /// Adds <paramref name="value"/> to <paramref name="list"/> unless an ordinally equal value is already in it,
+        /// creating the list on first use. Matches <see cref="HashSet{T}.Add"/> with the default string comparer.
+        /// </summary>
+        private static void AddDistinct(ref List<string> list, string value)
+        {
+            if (list == null)
+            {
+                list = new List<string>();
+            }
+            else
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (string.Equals(list[i], value, System.StringComparison.Ordinal))
+                        return;
+                }
+            }
+
+            list.Add(value);
+        }
+
+        private static int Count(List<string> list) => list == null ? 0 : list.Count;
+
+        private static string[] ToArray(List<string> list) => Count(list) == 0 ? new string[0] : list.ToArray();
+
+        private static string Join(string separator, List<string> list) => Count(list) == 0 ? string.Empty : string.Join(separator, list);
 
         /// <summary>
         /// Copies the custom components and tracked features of <paramref name="source"/> into this instance.
@@ -124,13 +152,14 @@ namespace Amazon.Runtime.Internal.UserAgent
         /// </summary>
         internal void MergeFrom(UserAgentDetails source)
         {
-            if (source._userAgentCustomComponents.Count > 0)
+            if (Count(source._userAgentCustomComponents) > 0)
             {
                 AddUserAgentComponent(source.GetCustomUserAgentComponents());
             }
-            foreach (var featureId in source._trackedFeatureIds)
+            var sourceFeatureIds = source._trackedFeatureIds;
+            for (int i = 0; i < Count(sourceFeatureIds); i++)
             {
-                _trackedFeatureIds.Add(featureId);
+                AddDistinct(ref _trackedFeatureIds, sourceFeatureIds[i]);
             }
         }
 
@@ -141,7 +170,7 @@ namespace Amazon.Runtime.Internal.UserAgent
         /// <returns>The formatted User-Agent metrics string.</returns>
         private string GenerateMetricsUserAgent()
         {
-            if (_trackedFeatureIds.Count == 0)
+            if (Count(_trackedFeatureIds) == 0)
             {
                 return string.Empty;
             }
