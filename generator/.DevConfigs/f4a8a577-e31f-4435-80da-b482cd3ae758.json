@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of formatting ISO 8601 and RFC 822 timestamps on .NET 8 and later."
+    ]
+  }
+}

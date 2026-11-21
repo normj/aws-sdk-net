@@ -319,7 +319,7 @@ namespace Amazon.Runtime.Internal.Util
         /// </summary>
         public static string FromDateTimeToISO8601(DateTime value)
         {
-            return value.ToUniversalTime().ToString(AWSSDKUtils.ISO8601DateFormat, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.ToUniversalTime(), includeMilliseconds: true);
         }
 
         /// <summary>
@@ -332,7 +332,7 @@ namespace Amazon.Runtime.Internal.Util
                 return null;
             }
 
-            return value.Value.ToUniversalTime().ToString(AWSSDKUtils.ISO8601DateFormat, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.Value.ToUniversalTime(), includeMilliseconds: true);
         }
 
         /// <summary>
@@ -340,7 +340,7 @@ namespace Amazon.Runtime.Internal.Util
         /// </summary>
         public static string FromDateTimeToISO8601NoMs(DateTime value)
         {
-            return value.ToUniversalTime().ToString(AWSSDKUtils.ISO8601DateFormatNoMS, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.ToUniversalTime(), includeMilliseconds: false);
         }
 
         /// <summary>
@@ -353,7 +353,7 @@ namespace Amazon.Runtime.Internal.Util
                 return null;
             }
 
-            return value.Value.ToUniversalTime().ToString(AWSSDKUtils.ISO8601DateFormatNoMS, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.Value.ToUniversalTime(), includeMilliseconds: false);
         }
 
         /// <summary>
@@ -362,10 +362,7 @@ namespace Amazon.Runtime.Internal.Util
         /// </summary>
         public static string FromDateTimeToISO8601WithOptionalMs(DateTime value)
         {
-            var format = value.Millisecond == 0
-                ? AWSSDKUtils.ISO8601DateFormatNoMS
-                : AWSSDKUtils.ISO8601DateFormat;
-            return value.ToUniversalTime().ToString(format, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.ToUniversalTime(), includeMilliseconds: value.Millisecond != 0);
         }
 
         /// <summary>
@@ -379,10 +376,7 @@ namespace Amazon.Runtime.Internal.Util
                 return null;
             }
 
-            var format = value.Value.Millisecond == 0
-                ? AWSSDKUtils.ISO8601DateFormatNoMS
-                : AWSSDKUtils.ISO8601DateFormat;
-            return value.Value.ToUniversalTime().ToString(format, CultureInfo.InvariantCulture);
+            return FormatISO8601(value.Value.ToUniversalTime(), includeMilliseconds: value.Value.Millisecond != 0);
         }
 
         /// <summary>
@@ -390,8 +384,7 @@ namespace Amazon.Runtime.Internal.Util
         /// </summary>
         public static string FromDateTimeToRFC822(DateTime value)
         {
-            return value.ToUniversalTime().ToString(
-                AWSSDKUtils.RFC822DateFormat, CultureInfo.InvariantCulture);
+            return FormatRFC822(value.ToUniversalTime());
         }
 
         /// <summary>
@@ -404,8 +397,42 @@ namespace Amazon.Runtime.Internal.Util
                 return null;
             }
 
-            return value.Value.ToUniversalTime().ToString(
-                AWSSDKUtils.RFC822DateFormat, CultureInfo.InvariantCulture);
+            return FormatRFC822(value.Value.ToUniversalTime());
+        }
+
+        // Same output as utc.ToString(ISO8601DateFormat or ISO8601DateFormatNoMS, InvariantCulture).
+        // On .NET 8+ the invariant "s" pattern (yyyy-MM-ddTHH:mm:ss) has a BCL fast path; the
+        // milliseconds are appended truncated, exactly as the "fff" specifier does.
+        private static string FormatISO8601(DateTime utc, bool includeMilliseconds)
+        {
+#if NET8_0_OR_GREATER
+            return string.Create(includeMilliseconds ? 24 : 20, (utc, includeMilliseconds), static (span, state) =>
+            {
+                state.utc.TryFormat(span, out _, "s", CultureInfo.InvariantCulture);
+                if (state.includeMilliseconds)
+                {
+                    int ms = state.utc.Millisecond;
+                    span[19] = '.';
+                    span[20] = (char)('0' + ms / 100);
+                    span[21] = (char)('0' + ms / 10 % 10);
+                    span[22] = (char)('0' + ms % 10);
+                }
+                span[span.Length - 1] = 'Z';
+            });
+#else
+            return utc.ToString(includeMilliseconds ? AWSSDKUtils.ISO8601DateFormat : AWSSDKUtils.ISO8601DateFormatNoMS, CultureInfo.InvariantCulture);
+#endif
+        }
+
+        // Same output as utc.ToString(RFC822DateFormat, InvariantCulture): the invariant "R"
+        // pattern is "ddd, dd MMM yyyy HH':'mm':'ss 'GMT'" and formats the value as given.
+        private static string FormatRFC822(DateTime utc)
+        {
+#if NET8_0_OR_GREATER
+            return utc.ToString("R", CultureInfo.InvariantCulture);
+#else
+            return utc.ToString(AWSSDKUtils.RFC822DateFormat, CultureInfo.InvariantCulture);
+#endif
         }
 
         /// <summary>
