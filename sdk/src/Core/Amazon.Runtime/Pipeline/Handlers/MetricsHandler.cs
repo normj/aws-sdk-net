@@ -19,6 +19,7 @@ using System.Globalization;
 using System;
 using Amazon.Runtime.Telemetry;
 using Amazon.Runtime.Telemetry.Tracing;
+using Amazon.Runtime.Telemetry.Tracing.NoOp;
 using Amazon.Runtime.Telemetry.Metrics;
 
 namespace Amazon.Runtime.Internal
@@ -67,7 +68,10 @@ namespace Amazon.Runtime.Internal
             }
             catch (Exception ex)
             {
-                span.CaptureException(ex);
+                // The no-op span discards the exception details; building them (the stack trace in
+                // particular) is the most expensive allocation of a failed request.
+                if (!(span is NoOpTraceSpan))
+                    span.CaptureException(ex);
                 MetricsUtilities.RecordError(executionContext.RequestContext, ex);
                 throw;
             }
@@ -114,7 +118,10 @@ namespace Amazon.Runtime.Internal
             }
             catch (Exception ex)
             {
-                span.CaptureException(ex);
+                // The no-op span discards the exception details; building them (the stack trace in
+                // particular) is the most expensive allocation of a failed request.
+                if (!(span is NoOpTraceSpan))
+                    span.CaptureException(ex);
                 MetricsUtilities.RecordError(executionContext.RequestContext, ex);
                 throw;
             }
