@@ -194,22 +194,21 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 var byRegionName = new Dictionary<string, Partition>(_partitionsByRegionName.Count);
                 foreach (var kvp in _partitionsByRegionName)
                 {
-                    byRegionName.Add(kvp.Key, GetPrototype(kvp.Value));
+                    byRegionName.Add(kvp.Key, GetPrototypeOrNull(kvp.Value));
                 }
 
                 var byRegex = new (Regex, Partition)[_partitionsByRegex.Count];
                 for (int i = 0; i < byRegex.Length; i++)
                 {
                     var entry = _partitionsByRegex[i];
-                    byRegex[i] = (entry.Regex, GetPrototype(entry.Partition));
+                    byRegex[i] = (entry.Regex, GetPrototypeOrNull(entry.Partition));
                 }
 
                 snapshot = new Snapshot
                 {
                     ByRegionName = byRegionName,
                     ByRegex = byRegex,
-                    // A missing default keeps failing on use (FromPartitionData(null) throws), not here.
-                    DefaultPrototype = _defaultPartition == null ? null : GetPrototype(_defaultPartition),
+                    DefaultPrototype = GetPrototypeOrNull(_defaultPartition),
                 };
                 _snapshot = snapshot;
                 return snapshot;
@@ -220,6 +219,18 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             }
         }
 
+        // A partition without data (no "outputs" in a loaded file, or no default partition) keeps
+        // failing when a lookup resolves to it, not when the snapshot is built.
+        private static Partition GetPrototypeOrNull(PartitionAttributesShape data)
+        {
+            return data == null ? null : GetPrototype(data);
+        }
+
+        private static Partition CopyPrototype(Partition prototype)
+        {
+            return prototype != null ? new Partition(prototype) : FromPartitionData(null);
+        }
+
         internal static Partition GetPartitionByRegion(string region)
         {
             var snapshot = GetSnapshot();
@@ -227,21 +238,17 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             // direct match
             if (snapshot.ByRegionName.TryGetValue(region, out prototype))
             {
-                return new Partition(prototype);
+                return CopyPrototype(prototype);
             }
             // regex match using cached compiled Regex instances
             foreach (var entry in snapshot.ByRegex)
             {
                 if (entry.Regex.IsMatch(region))
                 {
-                    return new Partition(entry.Prototype);
+                    return CopyPrototype(entry.Prototype);
                 }
             }
-            if (snapshot.DefaultPrototype != null)
-            {
-                return new Partition(snapshot.DefaultPrototype);
-            }
-            return FromPartitionData(null);
+            return CopyPrototype(snapshot.DefaultPrototype);
         }
     }
 }

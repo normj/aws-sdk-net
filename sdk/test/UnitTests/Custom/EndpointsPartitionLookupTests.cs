@@ -237,6 +237,48 @@ namespace AWSSDK.UnitTests
         }
 
         [TestMethod]
+        public void LoadPartitionsWithPartitionMissingOutputsFailsOnlyForThatPartition()
+        {
+            var json = @"{
+  ""version"": ""1.1"",
+  ""partitions"": [
+    {
+      ""id"": ""aws"",
+      ""regionRegex"": ""^zz\\-\\w+\\-\\d+$"",
+      ""regions"": { ""zz-east-1"": {} },
+      ""outputs"": { ""name"": ""aws-test"", ""dnsSuffix"": ""aws.example"", ""dualStackDnsSuffix"": ""ds.aws.example"", ""supportsFIPS"": true, ""supportsDualStack"": true, ""implicitGlobalRegion"": ""zz-east-1"" }
+    },
+    {
+      ""id"": ""broken"",
+      ""regionRegex"": ""^br\\-\\w+\\-\\d+$"",
+      ""regions"": { ""broken-region-1"": {} }
+    }
+  ]
+}";
+            using (new PartitionStateRestorer())
+            {
+                var file = Path.Combine(Path.GetTempPath(), "partitions-" + Guid.NewGuid().ToString("N") + ".json");
+                File.WriteAllText(file, json);
+                try
+                {
+                    Partition.LoadPartitions(file);
+                }
+                finally
+                {
+                    File.Delete(file);
+                }
+
+                Assert.AreEqual("aws-test", Fn.Partition("zz-east-1").name);
+                Assert.AreEqual("aws-test", Fn.Partition("us-west-2").name);
+                Assert.ThrowsExactly<ArgumentNullException>(() => Fn.Partition("broken-region-1"));
+                Assert.ThrowsExactly<ArgumentNullException>(() => Fn.Partition("br-west-1"));
+                Assert.AreEqual("aws-test", Fn.Partition("zz-west-2").name);
+            }
+
+            Assert.AreEqual("aws", Fn.Partition("us-west-2").name);
+        }
+
+        [TestMethod]
         public void LoadPartitionsMissingFileKeepsData()
         {
             Assert.AreEqual("aws", Fn.Partition("us-west-2").name);
