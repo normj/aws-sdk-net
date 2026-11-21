@@ -86,10 +86,15 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         internal static Partition FromPartitionData(PartitionAttributesShape data)
         {
+            return new Partition(GetPrototype(data));
+        }
+
+        private static Partition GetPrototype(PartitionAttributesShape data)
+        {
             // Endpoint rules call Partition(region) on every request. Build the bag once per
             // partition shape and  hand out exact-size copies, which avoids the repeated dictionary
             // growth and boolean boxing while still giving each caller its own (mutable) instance.
-            var prototype = _prototypes.GetValue(data, static shape => new Partition
+            return _prototypes.GetValue(data, static shape => new Partition
             {
                 name = shape.name,
                 dnsSuffix = shape.dnsSuffix,
@@ -98,8 +103,6 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 supportsDualStack = shape.supportsDualStack,
                 implicitGlobalRegion = shape.implicitGlobalRegion,
             });
-
-            return new Partition(prototype);
         }
 
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PartitionAttributesShape, Partition> _prototypes =
@@ -150,35 +153,102 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             }
             finally
             {
+                // Readers rebuild the snapshot from whatever this method left behind, including a
+                // partially loaded state if it threw, exactly as they read these fields before.
+                _snapshot = null;
                 _locker.ExitWriteLock();
             }
         }
 
-        internal static Partition GetPartitionByRegion(string region)
+        /// <summary>
+        /// Immutable view of the partition tables, with the prototype bag for each partition already
+        /// resolved. Readers use it without taking <see cref="_locker"/>; it is rebuilt (under the write
+        /// lock) after the tables change.
+        /// </summary>
+        private sealed class Snapshot
         {
-            _locker.EnterReadLock();
+            internal Dictionary<string, Partition> ByRegionName;
+            internal (Regex Regex, Partition Prototype)[] ByRegex;
+            internal Partition DefaultPrototype;
+        }
+
+        private static volatile Snapshot _snapshot;
+
+        private static Snapshot GetSnapshot()
+        {
+            var snapshot = _snapshot;
+            return snapshot ?? BuildSnapshot();
+        }
+
+        private static Snapshot BuildSnapshot()
+        {
+            _locker.EnterWriteLock();
             try
             {
-                PartitionAttributesShape partition;
-                // direct match
-                if (_partitionsByRegionName.TryGetValue(region, out partition))
+                var snapshot = _snapshot;
+                if (snapshot != null)
                 {
-                    return FromPartitionData(partition);
+                    return snapshot;
                 }
-                // regex match using cached compiled Regex instances
-                foreach (var entry in _partitionsByRegex)
+
+                var byRegionName = new Dictionary<string, Partition>(_partitionsByRegionName.Count);
+                foreach (var kvp in _partitionsByRegionName)
                 {
-                    if (entry.Regex.IsMatch(region))
-                    {
-                        return FromPartitionData(entry.Partition);
-                    }
+                    byRegionName.Add(kvp.Key, GetPrototypeOrNull(kvp.Value));
                 }
-                return FromPartitionData(_defaultPartition);
+
+                var byRegex = new (Regex, Partition)[_partitionsByRegex.Count];
+                for (int i = 0; i < byRegex.Length; i++)
+                {
+                    var entry = _partitionsByRegex[i];
+                    byRegex[i] = (entry.Regex, GetPrototypeOrNull(entry.Partition));
+                }
+
+                snapshot = new Snapshot
+                {
+                    ByRegionName = byRegionName,
+                    ByRegex = byRegex,
+                    DefaultPrototype = GetPrototypeOrNull(_defaultPartition),
+                };
+                _snapshot = snapshot;
+                return snapshot;
             }
             finally
             {
-                _locker.ExitReadLock();
+                _locker.ExitWriteLock();
             }
+        }
+
+        // A partition without data (no "outputs" in a loaded file, or no default partition) keeps
+        // failing when a lookup resolves to it, not when the snapshot is built.
+        private static Partition GetPrototypeOrNull(PartitionAttributesShape data)
+        {
+            return data == null ? null : GetPrototype(data);
+        }
+
+        private static Partition CopyPrototype(Partition prototype)
+        {
+            return prototype != null ? new Partition(prototype) : FromPartitionData(null);
+        }
+
+        internal static Partition GetPartitionByRegion(string region)
+        {
+            var snapshot = GetSnapshot();
+            Partition prototype;
+            // direct match
+            if (snapshot.ByRegionName.TryGetValue(region, out prototype))
+            {
+                return CopyPrototype(prototype);
+            }
+            // regex match using cached compiled Regex instances
+            foreach (var entry in snapshot.ByRegex)
+            {
+                if (entry.Regex.IsMatch(region))
+                {
+                    return CopyPrototype(entry.Prototype);
+                }
+            }
+            return CopyPrototype(snapshot.DefaultPrototype);
         }
     }
 }

@@ -1,0 +1,9 @@
+{
+  "core": {
+    "changeLogMessages": [
+      "Improved performance of endpoint partition lookups by reading an immutable snapshot of the partition data instead of taking a reader-writer lock on every call."
+    ],
+    "type": "patch",
+    "updateMinimum": false
+  }
+}
