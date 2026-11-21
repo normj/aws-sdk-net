@@ -89,6 +89,22 @@ namespace Amazon.Runtime.Internal.Util
         }
 
         private readonly ReadStrategy _readStrategy = ReadStrategy.ReadDirect;
+
+#if NET8_0_OR_GREATER
+        // SigV4 only: the UTF-8 string to sign for a data chunk, reused for every chunk of this stream:
+        // "AWS4-HMAC-SHA256-PAYLOAD\n{date-time}\n{scope}\n{previous signature}\n{empty body hash}\n{chunk hash}".
+        // Only the previous signature (64 hex digits) and the chunk hash (the last 64 bytes) change between chunks.
+        // Null when the old string-based path is used (SigV4a, or a seed signature or signing key it cannot handle).
+        private readonly byte[] _v4ChunkStringToSign;
+        private readonly int _v4PreviousSignatureOffset;
+
+        // True once a chunk signature has been written to _v4ChunkStringToSign but not to PreviousChunkSignature.
+        private bool _v4PreviousSignatureInBuffer;
+
+        private static readonly byte[] LowerHexDigits = Encoding.ASCII.GetBytes("0123456789abcdef");
+        private static readonly byte[] EmptyBodySha256Utf8 = Encoding.ASCII.GetBytes(AWS4Signer.EmptyBodySha256);
+        private static readonly byte[] ChunkSignatureHeaderUtf8 = Encoding.ASCII.GetBytes(CHUNK_SIGNATURE_HEADER);
+#endif
         /// <summary>
         /// Initializes a chunked upload stream
         /// </summary>
@@ -107,6 +123,9 @@ namespace Amazon.Runtime.Internal.Util
             if (headerSigningResult is AWS4SigningResult v4SigningResult)
             {
                 _signingKey = v4SigningResult.GetSigningKey();
+#if NET8_0_OR_GREATER
+                _v4ChunkStringToSign = CreateV4ChunkStringToSign(v4SigningResult, PreviousChunkSignature, _signingKey, out _v4PreviousSignatureOffset);
+#endif
             }
 
             _wrappedStreamBufferSize = wrappedStreamBufferSize;
@@ -387,6 +406,13 @@ namespace Amazon.Runtime.Internal.Util
         /// <param name="dataLen"></param>
         private void ConstructOutputBufferChunk(int dataLen)
         {
+#if NET8_0_OR_GREATER
+            if (_v4ChunkStringToSign != null)
+            {
+                ConstructV4OutputBufferChunk(dataLen);
+                return;
+            }
+#endif
             var isFinalDataChunk = dataLen == 0;
 
             var prefix = HeaderSigningResult is AWS4aSigningResult ? V4A_CHUNK_STRING_TO_SIGN_PREFIX : V4_CHUNK_STRING_TO_SIGN_PREFIX;
@@ -443,6 +469,113 @@ namespace Amazon.Runtime.Internal.Util
             }
         }
 
+#if NET8_0_OR_GREATER
+        /// <summary>
+        /// Builds the reusable UTF-8 chunk string to sign for SigV4, or returns null when the string-based path must be
+        /// kept: a seed signature that is not 64 ASCII characters (its UTF-8 length would differ), or a signing key that
+        /// is null or empty (HMACSignBinary throws for it, and the string-based path keeps that exception).
+        /// </summary>
+        private static byte[] CreateV4ChunkStringToSign(AWS4SigningResult signingResult, string seedSignature, byte[] signingKey, out int previousSignatureOffset)
+        {
+            previousSignatureOffset = 0;
+            if (signingKey == null || signingKey.Length == 0 || seedSignature == null || seedSignature.Length != V4_SIGNATURE_LENGTH || !Ascii.IsValid(seedSignature))
+                return null;
+
+            // Same text, in the same order, as BuildChunkedStringToSign; a null part contributes nothing, as in a concatenation.
+            var prefix = V4_CHUNK_STRING_TO_SIGN_PREFIX + "\n" + signingResult.ISO8601DateTime + "\n" + signingResult.Scope + "\n";
+            var prefixLength = Encoding.UTF8.GetByteCount(prefix);
+            var buffer = new byte[prefixLength + V4_SIGNATURE_LENGTH + 1 + EmptyBodySha256Utf8.Length + 1 + V4_SIGNATURE_LENGTH];
+
+            var pos = Encoding.UTF8.GetBytes(prefix, 0, prefix.Length, buffer, 0);
+            previousSignatureOffset = pos;
+            pos += Encoding.ASCII.GetBytes(seedSignature, 0, seedSignature.Length, buffer, pos);
+            buffer[pos++] = (byte)'\n';
+            EmptyBodySha256Utf8.CopyTo(buffer, pos);
+            pos += EmptyBodySha256Utf8.Length;
+            buffer[pos] = (byte)'\n';
+            return buffer;
+        }
+
+        /// <summary>
+        /// SigV4 version of <see cref="ConstructOutputBufferChunk"/> that produces the same bytes without per-chunk strings:
+        /// the chunk hash and signature are hex-encoded straight into the reusable string to sign, and the chunk header is
+        /// written straight into the output buffer.
+        /// </summary>
+        private void ConstructV4OutputBufferChunk(int dataLen)
+        {
+            var isFinalDataChunk = dataLen == 0;
+            var stringToSign = _v4ChunkStringToSign;
+            var chunkHash = stringToSign.AsSpan(stringToSign.Length - V4_SIGNATURE_LENGTH);
+            if (dataLen > 0)
+            {
+                Span<byte> hash = stackalloc byte[32];
+                SHA256.HashData(_inputBuffer.AsSpan(0, dataLen), hash);
+                WriteLowerHex(hash, chunkHash);
+            }
+            else
+            {
+                EmptyBodySha256Utf8.CopyTo(chunkHash);
+            }
+
+            // The new signature replaces the previous one in the string to sign, ready for the next chunk.
+            Span<byte> signature = stackalloc byte[32];
+            HMACSHA256.HashData(_signingKey, stringToSign, signature);
+            var chunkSignature = stringToSign.AsSpan(_v4PreviousSignatureOffset, V4_SIGNATURE_LENGTH);
+            WriteLowerHex(signature, chunkSignature);
+            _v4PreviousSignatureInBuffer = true;
+
+            // If we're sending a trailing checksum, update the rolling checksum with this chunk's raw data
+            if (_hashAlgorithm != null)
+            {
+                _hashAlgorithm.TransformBlock(_inputBuffer, 0, dataLen, _inputBuffer, 0);
+            }
+
+            try
+            {
+                // "<hex size>;chunk-signature=<signature>\r\n"
+                var output = _outputBuffer.AsSpan();
+                if (!dataLen.TryFormat(output, out int writePos, "X", CultureInfo.InvariantCulture))
+                    throw new InvalidOperationException("The chunk header does not fit in the output buffer.");
+                ChunkSignatureHeaderUtf8.CopyTo(output.Slice(writePos));
+                writePos += ChunkSignatureHeaderUtf8.Length;
+                chunkSignature.CopyTo(output.Slice(writePos));
+                writePos += V4_SIGNATURE_LENGTH;
+                _outputBuffer[writePos++] = (byte)'\r';
+                _outputBuffer[writePos++] = (byte)'\n';
+
+                if (dataLen > 0)
+                {
+                    Buffer.BlockCopy(_inputBuffer, 0, _outputBuffer, writePos, dataLen);
+                    writePos += dataLen;
+                }
+
+                // Append a trailing CRLF unless this is the final data chunk and there are trailing headers
+                if (!(isFinalDataChunk && _trailingHeaders?.Count > 0))
+                {
+                    _outputBuffer[writePos++] = (byte)'\r';
+                    _outputBuffer[writePos++] = (byte)'\n';
+                }
+
+                _outputBufferPos = 0;
+                _outputBufferDataLen = writePos;
+            }
+            catch (Exception e)
+            {
+                throw new AmazonClientException("Unable to sign the chunked data. " + e.Message, e);
+            }
+        }
+
+        private static void WriteLowerHex(ReadOnlySpan<byte> source, Span<byte> destination)
+        {
+            var digits = LowerHexDigits;
+            for (int i = 0; i < source.Length; i++)
+            {
+                destination[2 * i] = digits[source[i] >> 4];
+                destination[2 * i + 1] = digits[source[i] & 0xF];
+            }
+        }
+#endif
+
         /// <summary>
         /// Constructs the signed trailing headers, optionally including
         /// the selected checksum for this stream's data. For example:
@@ -454,6 +587,13 @@ namespace Amazon.Runtime.Internal.Util
         /// <returns>Stream chunk containing the trailing headers and their signature</returns>
         private string ConstructSignedTrailersChunk()
         {
+#if NET8_0_OR_GREATER
+            if (_v4PreviousSignatureInBuffer)
+            {
+                PreviousChunkSignature = Encoding.ASCII.GetString(_v4ChunkStringToSign, _v4PreviousSignatureOffset, V4_SIGNATURE_LENGTH);
+                _v4PreviousSignatureInBuffer = false;
+            }
+#endif
             // If the trailing headers included a trailing checksum, set the hash value
             if (_hashAlgorithm != null)
             {
