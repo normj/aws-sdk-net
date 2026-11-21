@@ -48,8 +48,24 @@ namespace Amazon.Runtime.Internal.Transform
         {
             get
             {
+#if NET8_0_OR_GREATER
+                // Decode the cached bytes in place. GetResponseBodyBytes copies them into a new
+                // array for its caller, which this property only needs to read once.
+                if (IsException)
+                {
+                    return System.Text.UTF8Encoding.UTF8.GetString(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.WrappingStream.AllReadBytes));
+                }
+
+                if (MaintainResponseBody)
+                {
+                    return System.Text.UTF8Encoding.UTF8.GetString(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.WrappingStream.LoggableReadBytes));
+                }
+
+                return string.Empty;
+#else
                 var bytes = GetResponseBodyBytes();
                 return System.Text.UTF8Encoding.UTF8.GetString(bytes, 0, bytes.Length);
+#endif
             }
         }
 
