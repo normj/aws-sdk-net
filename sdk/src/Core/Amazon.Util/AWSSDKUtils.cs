@@ -667,7 +667,143 @@ namespace Amazon.Util
             {
                 return resourcePath; 
             }
-            return JoinResourcePathSegmentsV2(SplitResourcePathIntoSegmentsV2(resourcePath, pathResources));
+
+            // With no labels to resolve every segment is a literal, encoded with the path character set. That set
+            // keeps '/', and the encoder works byte by byte, so encoding the whole path at once gives the same string
+            // as splitting it at '/', encoding each segment and joining them with '/'.
+            if (pathResources == null || pathResources.Count == 0)
+            {
+                return UrlEncode(resourcePath, true);
+            }
+
+            return TryResolveResourcePathInOnePass(resourcePath, pathResources)
+                ?? JoinResourcePathSegmentsV2(SplitResourcePathIntoSegmentsV2(resourcePath, pathResources));
+        }
+
+        /// <summary>
+        /// Builds the same string as <see cref="SplitResourcePathIntoSegmentsV2"/> followed by
+        /// <see cref="JoinResourcePathSegmentsV2(IEnumerable{UriComponent})"/>, in one pass and without the
+        /// intermediate arrays, lists, segment objects and per-segment strings. A segment that is a key of
+        /// <paramref name="pathResources"/> is a label: its value is encoded without the path character set, and a
+        /// greedy label's value ("{Key+}") is split at each '/' into label segments. Any other segment is a literal,
+        /// encoded with the path character set. Returns null when a greedy label's value is null, so the caller can
+        /// take the segment-list path and throw exactly as before.
+        /// </summary>
+        [SkipLocalsInit]
+        private static string TryResolveResourcePathInOnePass(string resourcePath, IDictionary<string, string> pathResources)
+        {
+            // DefaultRequest keeps path resources in an ordinal Dictionary. For an ordinal dictionary a segment
+            // matches a key exactly when their characters are equal, so the keys can be compared with the segment
+            // span instead of allocating a substring per segment for TryGetValue.
+            var ordinalDictionary = pathResources as Dictionary<string, string>;
+            if (ordinalDictionary != null
+                && !ReferenceEquals(ordinalDictionary.Comparer, StringComparer.Ordinal)
+                && !ReferenceEquals(ordinalDictionary.Comparer, EqualityComparer<string>.Default))
+            {
+                ordinalDictionary = null;
+            }
+
+            Span<byte> scratch = stackalloc byte[512];
+            var builder = new ValueStringBuilder(stackalloc char[256]);
+
+            var start = 0;
+            while (true)
+            {
+                var slash = resourcePath.IndexOf(SlashChar, start);
+                var end = slash < 0 ? resourcePath.Length : slash;
+                var segment = resourcePath.AsSpan(start, end - start);
+                if (start > 0)
+                    builder.Append(SlashChar);
+
+                string resolvedSegment = null;
+                bool isLabel = false;
+                if (ordinalDictionary != null)
+                {
+                    foreach (var pathResource in ordinalDictionary)
+                    {
+                        if (segment.SequenceEqual(pathResource.Key.AsSpan()))
+                        {
+                            isLabel = true;
+                            resolvedSegment = pathResource.Value;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    isLabel = pathResources.TryGetValue(segment.ToString(), out resolvedSegment);
+                }
+
+                if (!isLabel)
+                {
+                    AppendUrlEncoded(ref builder, segment, true, scratch);
+                }
+                else if (segment.EndsWith("+}".AsSpan(), StringComparison.Ordinal))
+                {
+                    if (resolvedSegment == null)
+                    {
+                        builder.Dispose();
+                        return null;
+                    }
+
+                    // Greedy label: each '/'-separated part of the value is its own label segment.
+                    var valueStart = 0;
+                    while (true)
+                    {
+                        var valueSlash = resolvedSegment.IndexOf(SlashChar, valueStart);
+                        var valueEnd = valueSlash < 0 ? resolvedSegment.Length : valueSlash;
+                        if (valueStart > 0)
+                            builder.Append(SlashChar);
+                        AppendUrlEncoded(ref builder, resolvedSegment.AsSpan(valueStart, valueEnd - valueStart), false, scratch);
+                        if (valueSlash < 0)
+                            break;
+                        valueStart = valueSlash + 1;
+                    }
+                }
+                else
+                {
+                    // A null value encodes to the empty string, as UrlEncode(null, false) does.
+                    AppendUrlEncoded(ref builder, resolvedSegment.AsSpan(), false, scratch);
+                }
+
+                if (slash < 0)
+                    break;
+                start = slash + 1;
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Appends the characters of <c>UrlEncode(value, path)</c>. The encoder's output is always ASCII: the input's
+        /// UTF-8 bytes where every byte is allowed (allowed bytes are all below 128) and %XX escapes elsewhere.
+        /// </summary>
+        private static void AppendUrlEncoded(ref ValueStringBuilder builder, ReadOnlySpan<char> value, bool path, Span<byte> scratch)
+        {
+            if (value.IsEmpty)
+                return;
+
+            byte[] rented = null;
+            try
+            {
+                var required = 3 * Encoding.UTF8.GetMaxByteCount(value.Length);
+                var buffer = required <= scratch.Length
+                    ? scratch.Slice(0, required)
+                    : (rented = ArrayPool<byte>.Shared.Rent(required));
+
+                var encoded = UrlEncodeToSpan(3986, value, path, buffer, out _);
+
+                var destination = builder.AppendSpan(encoded.Length);
+                for (var i = 0; i < encoded.Length; i++)
+                {
+                    destination[i] = (char)encoded[i];
+                }
+            }
+            finally
+            {
+                if (rented != null)
+                    ArrayPool<byte>.Shared.Return(rented);
+            }
         }
 
         /// <summary>
