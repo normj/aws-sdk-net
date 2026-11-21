@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for XML responses whose body is not read, such as S3 PutObject, HeadObject and GetObject, by creating the XML unmarshaller context's StreamReader only when the body is first read."
+    ]
+  }
+}
