@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when endpoint rules read a single property of a partition, ARN or URL result."
+    ]
+  }
+}
