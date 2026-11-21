@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Amazon.Runtime;
@@ -77,6 +79,40 @@ namespace AWSSDK.UnitTests
             // Same request hashed twice (a retry) gives the same value.
             form.Headers.Remove(Amazon.Util.HeaderKeys.XAmzContentSha256Header);
             Assert.AreEqual(hash, AWS4Signer.SetRequestBodyHash(form, true, "STREAMING", 80));
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        [TestCategory("Runtime")]
+        public void ContentStreamHashMatchesReference()
+        {
+            var random = new Random(20261122);
+            foreach (var length in new[] { 0, 1, 32, 64, 100, 1000, 70000 })
+            {
+                var content = new byte[length];
+                random.NextBytes(content);
+
+                // Pooled body, as written by the generated JSON/XML/CBOR marshallers.
+                using (var pooled = new PooledContentStream())
+                {
+                    pooled.BufferWriter.Write(content);
+                    var request = NewRequest(null);
+                    request.ContentStream = pooled;
+                    var hash = AWS4Signer.SetRequestBodyHash(request, true, "STREAMING", 80);
+                    Assert.AreEqual(Reference(content), hash, "pooled, length " + length);
+                    Assert.AreEqual(hash, request.ComputeContentStreamHash());
+                    Assert.AreEqual(0, pooled.Position);
+                }
+
+                // Any other seekable stream.
+                using (var memory = new MemoryStream(content))
+                {
+                    var request = NewRequest(null);
+                    request.ContentStream = memory;
+                    Assert.AreEqual(Reference(content), AWS4Signer.SetRequestBodyHash(request, true, "STREAMING", 80), "memory, length " + length);
+                    Assert.AreEqual(0, memory.Position);
+                }
+            }
         }
 
         private sealed class StubRequest : AmazonWebServiceRequest { }
