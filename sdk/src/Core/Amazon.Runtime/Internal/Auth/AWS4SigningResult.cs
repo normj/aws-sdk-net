@@ -17,6 +17,7 @@ using Amazon.Util;
 using System;
 using System.Globalization;
 using System.Text;
+using ThirdParty.RuntimeBackports;
 
 namespace Amazon.Runtime.Internal.Auth
 {
@@ -89,8 +90,38 @@ namespace Amazon.Runtime.Internal.Auth
         {
             get
             {
-                return $"{AWS4Signer.AWS4AlgorithmTag} {AWS4Signer.Credential}={AccessKeyId}/{Scope}, " +
-                       $"{AWS4Signer.SignedHeaders}={SignedHeaders}, {AWS4Signer.Signature}={Signature}";
+                // A subclass may override Signature; only this type's own Signature is written directly.
+                if (_signature == null || GetType() != typeof(AWS4SigningResult))
+                {
+                    return $"{AWS4Signer.AWS4AlgorithmTag} {AWS4Signer.Credential}={AccessKeyId}/{Scope}, " +
+                           $"{AWS4Signer.SignedHeaders}={SignedHeaders}, {AWS4Signer.Signature}={Signature}";
+                }
+
+                var builder = new ValueStringBuilder(stackalloc char[512]);
+                builder.Append(AWS4Signer.AWS4AlgorithmTag + " " + AWS4Signer.Credential + "=");
+                builder.Append(AccessKeyId);
+                builder.Append('/');
+                builder.Append(Scope);
+                builder.Append(", " + AWS4Signer.SignedHeaders + "=");
+                builder.Append(SignedHeaders);
+                builder.Append(", " + AWS4Signer.Signature + "=");
+                AppendSignatureHex(ref builder);
+                return builder.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Appends the same characters as <see cref="Signature"/> without allocating the hex string.
+        /// </summary>
+        private void AppendSignatureHex(ref ValueStringBuilder builder)
+        {
+            const string hexDigits = "0123456789abcdef";
+            var destination = builder.AppendSpan(_signature.Length * 2);
+            for (int i = 0; i < _signature.Length; i++)
+            {
+                var b = _signature[i];
+                destination[2 * i] = hexDigits[b >> 4];
+                destination[2 * i + 1] = hexDigits[b & 0xF];
             }
         }
 
@@ -101,6 +132,26 @@ namespace Amazon.Runtime.Internal.Auth
         {
             get
             {
+                if (_signature != null && GetType() == typeof(AWS4SigningResult))
+                {
+                    // Same output as below. The parameter names, the algorithm tag, the '/' (%2F) and the hex
+                    // signature are fixed and need no encoding work; the access key and the scope are encoded
+                    // separately, which matches encoding them joined by '/' because UTF-8 is encoded per code point
+                    // and '/' cannot be part of a surrogate pair.
+                    var builder = new ValueStringBuilder(stackalloc char[512]);
+                    builder.Append(HeaderKeys.XAmzAlgorithm + "=" + AWS4Signer.AWS4AlgorithmTag + "&" + HeaderKeys.XAmzCredential + "=");
+                    builder.Append(AWSSDKUtils.UrlEncode(AccessKeyId, false));
+                    builder.Append("%2F");
+                    builder.Append(AWSSDKUtils.UrlEncode(Scope, false));
+                    builder.Append("&" + HeaderKeys.XAmzDateHeader + "=");
+                    builder.Append(AWSSDKUtils.UrlEncode(ISO8601DateTime, false));
+                    builder.Append("&" + HeaderKeys.XAmzSignedHeadersHeader + "=");
+                    builder.Append(AWSSDKUtils.UrlEncode(SignedHeaders, false));
+                    builder.Append("&" + HeaderKeys.XAmzSignature + "=");
+                    AppendSignatureHex(ref builder);
+                    return builder.ToString();
+                }
+
                 var authParams = new StringBuilder()
                     .AppendFormat("{0}={1}", AWSSDKUtils.UrlEncode(HeaderKeys.XAmzAlgorithm, false), AWSSDKUtils.UrlEncode(AWS4Signer.AWS4AlgorithmTag, false))
                     .AppendFormat("&{0}={1}", AWSSDKUtils.UrlEncode(HeaderKeys.XAmzCredential, false), AWSSDKUtils.UrlEncode(string.Format(CultureInfo.InvariantCulture, "{0}/{1}", AccessKeyId, Scope), false))
