@@ -86,10 +86,15 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         internal static Partition FromPartitionData(PartitionAttributesShape data)
         {
+            return new Partition(GetPrototype(data));
+        }
+
+        private static Partition GetPrototype(PartitionAttributesShape data)
+        {
             // Endpoint rules call Partition(region) on every request. Build the bag once per
             // partition shape and  hand out exact-size copies, which avoids the repeated dictionary
             // growth and boolean boxing while still giving each caller its own (mutable) instance.
-            var prototype = _prototypes.GetValue(data, static shape => new Partition
+            return _prototypes.GetValue(data, static shape => new Partition
             {
                 name = shape.name,
                 dnsSuffix = shape.dnsSuffix,
@@ -98,8 +103,6 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                 supportsDualStack = shape.supportsDualStack,
                 implicitGlobalRegion = shape.implicitGlobalRegion,
             });
-
-            return new Partition(prototype);
         }
 
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PartitionAttributesShape, Partition> _prototypes =
@@ -150,35 +153,95 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             }
             finally
             {
+                // Readers rebuild the snapshot from whatever this method left behind, including a
+                // partially loaded state if it threw, exactly as they read these fields before.
+                _snapshot = null;
+                _locker.ExitWriteLock();
+            }
+        }
+
+        /// <summary>
+        /// Immutable view of the partition tables, with the prototype bag for each partition already
+        /// resolved. Readers use it without taking <see cref="_locker"/>; it is rebuilt (under the write
+        /// lock) after the tables change.
+        /// </summary>
+        private sealed class Snapshot
+        {
+            internal Dictionary<string, Partition> ByRegionName;
+            internal (Regex Regex, Partition Prototype)[] ByRegex;
+            internal Partition DefaultPrototype;
+        }
+
+        private static volatile Snapshot _snapshot;
+
+        private static Snapshot GetSnapshot()
+        {
+            var snapshot = _snapshot;
+            return snapshot ?? BuildSnapshot();
+        }
+
+        private static Snapshot BuildSnapshot()
+        {
+            _locker.EnterWriteLock();
+            try
+            {
+                var snapshot = _snapshot;
+                if (snapshot != null)
+                {
+                    return snapshot;
+                }
+
+                var byRegionName = new Dictionary<string, Partition>(_partitionsByRegionName.Count);
+                foreach (var kvp in _partitionsByRegionName)
+                {
+                    byRegionName.Add(kvp.Key, GetPrototype(kvp.Value));
+                }
+
+                var byRegex = new (Regex, Partition)[_partitionsByRegex.Count];
+                for (int i = 0; i < byRegex.Length; i++)
+                {
+                    var entry = _partitionsByRegex[i];
+                    byRegex[i] = (entry.Regex, GetPrototype(entry.Partition));
+                }
+
+                snapshot = new Snapshot
+                {
+                    ByRegionName = byRegionName,
+                    ByRegex = byRegex,
+                    // A missing default keeps failing on use (FromPartitionData(null) throws), not here.
+                    DefaultPrototype = _defaultPartition == null ? null : GetPrototype(_defaultPartition),
+                };
+                _snapshot = snapshot;
+                return snapshot;
+            }
+            finally
+            {
                 _locker.ExitWriteLock();
             }
         }
 
         internal static Partition GetPartitionByRegion(string region)
         {
-            _locker.EnterReadLock();
-            try
+            var snapshot = GetSnapshot();
+            Partition prototype;
+            // direct match
+            if (snapshot.ByRegionName.TryGetValue(region, out prototype))
             {
-                PartitionAttributesShape partition;
-                // direct match
-                if (_partitionsByRegionName.TryGetValue(region, out partition))
-                {
-                    return FromPartitionData(partition);
-                }
-                // regex match using cached compiled Regex instances
-                foreach (var entry in _partitionsByRegex)
-                {
-                    if (entry.Regex.IsMatch(region))
-                    {
-                        return FromPartitionData(entry.Partition);
-                    }
-                }
-                return FromPartitionData(_defaultPartition);
+                return new Partition(prototype);
             }
-            finally
+            // regex match using cached compiled Regex instances
+            foreach (var entry in snapshot.ByRegex)
             {
-                _locker.ExitReadLock();
+                if (entry.Regex.IsMatch(region))
+                {
+                    return new Partition(entry.Prototype);
+                }
             }
+            if (snapshot.DefaultPrototype != null)
+            {
+                return new Partition(snapshot.DefaultPrototype);
+            }
+            return FromPartitionData(null);
         }
     }
 }
