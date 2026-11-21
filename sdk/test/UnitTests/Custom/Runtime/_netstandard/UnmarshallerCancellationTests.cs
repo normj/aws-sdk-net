@@ -72,6 +72,97 @@ namespace AWSSDK.UnitTests
             await AssertCancelledAsync(500);
         }
 
+        /// <summary>
+        /// Sends a complete response with the given status and body.
+        /// </summary>
+        private class CompleteBodyServlet : Servlet
+        {
+            private readonly int _statusCode;
+            private readonly string _body;
+
+            public CompleteBodyServlet(int statusCode, string body)
+            {
+                _statusCode = statusCode;
+                _body = body;
+            }
+
+            protected override void HandleRequest(HttpListenerContext context)
+            {
+                context.Response.ContentType = "application/xml";
+                WriteResponse(context.Response, _body, _statusCode);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public async Task UncancelableTokenReadsCompleteResponseBody()
+        {
+            var body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">" +
+                "<Name>bucket</Name><Contents><Key>a</Key></Contents><Contents><Key>b</Key></Contents></ListBucketResult>";
+
+            using (var servlet = new CompleteBodyServlet(200, body))
+            using (var client = CreateClient(servlet))
+            {
+                foreach (var token in new[] { CancellationToken.None, default(CancellationToken), new CancellationToken(false) })
+                {
+                    Assert.IsFalse(token.CanBeCanceled);
+                    var response = await client.ListObjectsAsync(new ListObjectsRequest { BucketName = "bucket" }, token);
+                    Assert.AreEqual("bucket", response.Name);
+                    Assert.AreEqual(2, response.S3Objects.Count);
+                    Assert.AreEqual("b", response.S3Objects[1].Key);
+                }
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public async Task UncancelableTokenReadsCompleteErrorResponseBody()
+        {
+            var body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                "<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ123</RequestId></Error>";
+
+            using (var servlet = new CompleteBodyServlet(403, body))
+            using (var client = CreateClient(servlet))
+            {
+                var ex = await Assert.ThrowsExactlyAsync<AmazonS3Exception>(
+                    () => client.ListObjectsAsync(new ListObjectsRequest { BucketName = "bucket" }, CancellationToken.None));
+                Assert.AreEqual("AccessDenied", ex.ErrorCode);
+                Assert.AreEqual("Access Denied", ex.Message);
+                Assert.AreEqual(HttpStatusCode.Forbidden, ex.StatusCode);
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public async Task CancelableTokenThatIsNotCanceledReadsCompleteResponseBody()
+        {
+            var body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">" +
+                "<Name>bucket</Name><Contents><Key>a</Key></Contents></ListBucketResult>";
+
+            using (var servlet = new CompleteBodyServlet(200, body))
+            using (var client = CreateClient(servlet))
+            using (var cts = new CancellationTokenSource())
+            {
+                var response = await client.ListObjectsAsync(new ListObjectsRequest { BucketName = "bucket" }, cts.Token);
+                Assert.AreEqual(1, response.S3Objects.Count);
+                // Cancelling after the call finished must not throw: the registration was disposed with the call.
+                cts.Cancel();
+            }
+        }
+
+        private static AmazonS3Client CreateClient(Servlet servlet)
+        {
+            var config = new AmazonS3Config
+            {
+                ServiceURL = servlet.ServiceURL,
+                ForcePathStyle = true,
+                MaxErrorRetry = 0
+            };
+            return new AmazonS3Client(new BasicAWSCredentials("ACCESS", "SECRET"), config);
+        }
+
         private static async Task AssertCancelledAsync(int statusCode)
         {
             using (var servlet = new StalledBodyServlet(statusCode))

@@ -83,7 +83,11 @@ namespace Amazon.Runtime.Internal
 
             // Error bodies are read synchronously; abort the response on cancellation so a stalled read
             // doesn't block forever (aws/aws-sdk-net#4534).
-            using (cancellationToken.Register(httpErrorResponse.ResponseBody.Dispose))
+            // A token that can never be canceled would never run the callback, so the delegate is
+            // only created when cancellation is possible.
+            using (cancellationToken.CanBeCanceled
+                ? cancellationToken.Register(httpErrorResponse.ResponseBody.Dispose)
+                : default(System.Threading.CancellationTokenRegistration))
             {
                 try
                 {
