@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for every request when building the HTTP request: the request URL builder is created only for sub-resources or query parameters, request headers are copied without a boxed enumerator, and the User-Agent debug log arguments are built only when debug logging is enabled."
+    ]
+  }
+}
