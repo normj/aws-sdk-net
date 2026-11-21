@@ -80,6 +80,31 @@ namespace Amazon.Runtime.Internal.Util
         // call (much faster than encoding one character at a time). Special characters are replaced
         // with their XML escape sequences. Most XML content has no special characters, so the
         // entire input is typically encoded in one batch call.
+#if NET8_0_OR_GREATER
+        private static readonly System.Buffers.SearchValues<char> SpecialChars = System.Buffers.SearchValues.Create("\n\u0085\u2028");
+
+        private void WriteSpan(ReadOnlySpan<char> span)
+        {
+            // Same output as the loop below: the vectorized IndexOfAny finds the next special
+            // character instead of testing one character at a time.
+            int i;
+            while ((i = span.IndexOfAny(SpecialChars)) >= 0)
+            {
+                if (i > 0)
+                    EncodeSpan(span.Slice(0, i));
+                WriteAscii(span[i] switch
+                {
+                    '\n' => "&#xA;",
+                    '\u0085' => "&#x85;",
+                    _ => "&#x2028;"
+                });
+                span = span.Slice(i + 1);
+            }
+
+            if (span.Length > 0)
+                EncodeSpan(span);
+        }
+#else
         private void WriteSpan(ReadOnlySpan<char> span)
         {
             int start = 0;
@@ -107,6 +132,8 @@ namespace Amazon.Runtime.Internal.Util
             if (start < span.Length)
                 EncodeSpan(span.Slice(start));
         }
+
+#endif
 
         // Escape sequences are pure ASCII, so each char maps 1:1 to a byte.
         private void WriteAscii(string ascii)
