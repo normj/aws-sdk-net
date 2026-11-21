@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations per request when a telemetry meter provider is configured by recording operation durations without allocating a measurer object."
+    ]
+  }
+}

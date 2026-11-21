@@ -87,7 +87,7 @@ namespace Amazon.Runtime.Internal
 
                 using (executionContext.RequestContext.Metrics.StartEvent(Metric.HttpRequestTime))
                 using (var traceSpan = TracingUtilities.CreateSpan(executionContext.RequestContext, TelemetryConstants.HTTPRequestSpanName))
-                using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
+                using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
                 {
                     // Send request body if present.
                     if (wrappedRequest.HasRequestBody())
@@ -224,7 +224,7 @@ namespace Amazon.Runtime.Internal
 
                 using (executionContext.RequestContext.Metrics.StartEvent(Metric.HttpRequestTime))
                 using (var traceSpan = TracingUtilities.CreateSpan(executionContext.RequestContext, TelemetryConstants.HTTPRequestSpanName))
-                using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
+                using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
                 {
                     // Send request body if present.
                     if (wrappedRequest.HasRequestBody())

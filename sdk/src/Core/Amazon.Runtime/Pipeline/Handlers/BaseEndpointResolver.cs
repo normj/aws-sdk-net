@@ -45,7 +45,7 @@ namespace Amazon.Runtime.Internal
 
         protected virtual void PreInvoke(IExecutionContext executionContext)
         {
-            using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.ResolveEndpointDurationMetricName))
+            using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.ResolveEndpointDurationMetricName))
             {
                 ProcessRequestHandlers(executionContext);
             }
