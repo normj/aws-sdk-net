@@ -420,6 +420,11 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         {
             if (string.IsNullOrEmpty(json))
                 return string.Empty;
+            return InterpolatedJsonTemplate.Interpolate(json, refs, InterpolateJsonUncached);
+        }
+
+        private static string InterpolateJsonUncached(string json, Dictionary<string, object> refs)
+        {
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(json);
