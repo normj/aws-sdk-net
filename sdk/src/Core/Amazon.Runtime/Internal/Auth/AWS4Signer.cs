@@ -1118,10 +1118,11 @@ namespace Amazon.Runtime.Internal.Auth
 
             if (request.UseQueryString && request.Parameters != null && request.Parameters.Count > 0)
             {
-                var requestParameters = request.ParameterCollection.GetSortedParametersList();
-                foreach (var queryParameter in requestParameters.Where(queryParameter => queryParameter.Value != null))
+                // Same sequence as GetSortedParametersList(), without materializing it into a list first.
+                foreach (var queryParameter in request.ParameterCollection.GetParametersEnumerable())
                 {
-                    parametersToCanonicalize.Add(new KeyValuePair<string,string>(queryParameter.Key, queryParameter.Value));
+                    if (queryParameter.Value != null)
+                        parametersToCanonicalize.Add(queryParameter);
                 }
             }
 
@@ -1186,6 +1187,16 @@ namespace Amazon.Runtime.Internal.Auth
             return CanonicalizeQueryParameters(queryParams, uriEncodeParameters: uriEncodeParameters);
         }
 
+        private static bool IsStrictlyOrdinalAscending(List<KeyValuePair<string, string>> parameters)
+        {
+            for (int i = 1; i < parameters.Count; i++)
+            {
+                if (StringComparer.Ordinal.Compare(parameters[i - 1].Key, parameters[i].Key) >= 0)
+                    return false;
+            }
+            return true;
+        }
+
         protected internal static string CanonicalizeQueryParameters(IEnumerable<KeyValuePair<string, string>> parameters)
         {
             return CanonicalizeQueryParameters(parameters, true);
@@ -1214,23 +1225,37 @@ namespace Amazon.Runtime.Internal.Auth
             if (parameters is ICollection<KeyValuePair<string, string>> coll && coll.Count == 0)
                 return string.Empty;
 
-            // Make a copy of the parameters so we can sort them without affecting the original collection.
-            List<KeyValuePair<string, string>> sortedParameters = new(parameters);
-            sortedParameters.Sort((x, y) => StringComparer.Ordinal.Compare(x.Key, y.Key));
+            // A list whose keys are already strictly ascending (the usual case: ParameterCollection is an ordinal
+            // SortedDictionary) is used as is, since sorting it cannot change it. Otherwise make a copy of the
+            // parameters so we can sort them without affecting the original collection.
+            List<KeyValuePair<string, string>> sortedParameters;
+            if (parameters is List<KeyValuePair<string, string>> list && IsStrictlyOrdinalAscending(list))
+            {
+                sortedParameters = list;
+            }
+            else
+            {
+                sortedParameters = new(parameters);
+                sortedParameters.Sort((x, y) => StringComparer.Ordinal.Compare(x.Key, y.Key));
+            }
 
             var canonicalQueryString = new ValueStringBuilder(sortedParameters.Count * 32);
             for (int i = 0; i < sortedParameters.Count; i++)
             {
                 var param = sortedParameters[i];
-                var key = uriEncodeParameters ? AWSSDKUtils.UrlEncode(param.Key, false) : param.Key;
-                var value = uriEncodeParameters ? AWSSDKUtils.UrlEncode(param.Value, false) : param.Value;
 
                 if (i > 0) canonicalQueryString.Append('&');
 
-                canonicalQueryString.Append(key);
+                // Appending the encoded form directly gives the same characters as UrlEncode, without a string.
+                if (uriEncodeParameters)
+                    AWSSDKUtils.AppendUrlEncoded(ref canonicalQueryString, param.Key, false);
+                else
+                    canonicalQueryString.Append(param.Key);
                 canonicalQueryString.Append('=');
-                if (!string.IsNullOrEmpty(value))
-                    canonicalQueryString.Append(value);
+                if (uriEncodeParameters)
+                    AWSSDKUtils.AppendUrlEncoded(ref canonicalQueryString, param.Value, false);
+                else if (!string.IsNullOrEmpty(param.Value))
+                    canonicalQueryString.Append(param.Value);
             }
 
             return canonicalQueryString.ToString();

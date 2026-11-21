@@ -1355,6 +1355,38 @@ namespace Amazon.Util
             return dataBuffer.Slice(0, index);
         }
 
+        /// <summary>
+        /// Appends <c>UrlEncode(data, path)</c> (RFC 3986) to <paramref name="builder"/> without creating the
+        /// encoded string. The encoder's output is ASCII, so each output byte is one char. Null or empty
+        /// <paramref name="data"/> appends nothing, as UrlEncode returns an empty string for it.
+        /// </summary>
+        internal static void AppendUrlEncoded(ref ValueStringBuilder builder, string data, bool path)
+        {
+            if (string.IsNullOrEmpty(data))
+                return;
+
+            byte[] sharedDataBuffer = null;
+            const int MaxStackLimit = 256;
+            try
+            {
+                var dataAsSpan = data.AsSpan();
+                var encodedByteLength = 3 * Encoding.UTF8.GetMaxByteCount(dataAsSpan.Length);
+                var dataBuffer = encodedByteLength <= MaxStackLimit
+                    ? stackalloc byte[MaxStackLimit]
+                    : sharedDataBuffer = ArrayPool<byte>.Shared.Rent(encodedByteLength);
+
+                var output = UrlEncodeToSpan(3986, dataAsSpan, path, dataBuffer, out _);
+
+                var destination = builder.AppendSpan(output.Length);
+                for (var i = 0; i < output.Length; i++)
+                    destination[i] = (char)output[i];
+            }
+            finally
+            {
+                if (sharedDataBuffer != null) ArrayPool<byte>.Shared.Return(sharedDataBuffer);
+            }
+        }
+
 #if !NETFRAMEWORK
         /// <summary>
         /// Percent-encodes <paramref name="data"/> per the given RFC and writes the resulting UTF-8 bytes

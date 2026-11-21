@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when building the SigV4 canonical query string in AWS4Signer."
+    ]
+  }
+}
