@@ -67,13 +67,13 @@ namespace Amazon.Runtime.Telemetry.Metrics
             if (initialAttributes == null)
                 initialAttributes = new Attributes();
 
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
+            var operationName = TelemetryNameCache.GetOperationName(requestContext.RequestName);
             initialAttributes.Set(TelemetryConstants.MethodAttributeKey, operationName);
 
             initialAttributes.Set(TelemetryConstants.SystemAttributeKey, TelemetryConstants.SystemAttributeValue);
             initialAttributes.Set(TelemetryConstants.ServiceAttributeKey, serviceId);
 
-            var scope = $"{TelemetryConstants.TelemetryScopePrefix}.{serviceId}";
+            var scope = TelemetryNameCache.GetScope(serviceId);
 
             var meter = requestContext.ClientConfig.TelemetryProvider.MeterProvider.GetMeter(scope);
             var monotonicCounter = meter.CreateMonotonicCounter<long>(metricName, unit);
@@ -96,7 +96,7 @@ namespace Amazon.Runtime.Telemetry.Metrics
             if (initialAttributes == null)
                 initialAttributes = new Attributes();
 
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
+            var operationName = TelemetryNameCache.GetOperationName(requestContext.RequestName);
             initialAttributes.Set(TelemetryConstants.MethodAttributeKey, operationName);
 
             return MeasureDuration(requestContext.ClientConfig, metricName, initialAttributes);
@@ -121,7 +121,7 @@ namespace Amazon.Runtime.Telemetry.Metrics
             attributes.Set(TelemetryConstants.ServiceAttributeKey, serviceId);
             attributes.Set(TelemetryConstants.SystemAttributeKey, TelemetryConstants.SystemAttributeValue);
 
-            var scope = $"{TelemetryConstants.TelemetryScopePrefix}.{serviceId}";
+            var scope = TelemetryNameCache.GetScope(serviceId);
             var meter = config.TelemetryProvider.MeterProvider.GetMeter(scope);
 
             return new DurationMetricsMeasurer(meter, metricName, attributes);
