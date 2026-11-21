@@ -47,11 +47,11 @@ namespace AWSSDK.UnitTests
         public void NullThrowsAsBefore()
         {
             // Lowercase has always dereferenced the array; uppercase on .NET 8+ goes through Convert.ToHexString.
-            Assert.ThrowsException<NullReferenceException>(() => AWSSDKUtils.ToHex(null, true));
+            Assert.ThrowsExactly<NullReferenceException>(() => AWSSDKUtils.ToHex(null, true));
 #if NET8_0_OR_GREATER
-            Assert.ThrowsException<ArgumentNullException>(() => AWSSDKUtils.ToHex(null, false));
+            Assert.ThrowsExactly<ArgumentNullException>(() => AWSSDKUtils.ToHex(null, false));
 #else
-            Assert.ThrowsException<NullReferenceException>(() => AWSSDKUtils.ToHex(null, false));
+            Assert.ThrowsExactly<NullReferenceException>(() => AWSSDKUtils.ToHex(null, false));
 #endif
         }
     }
