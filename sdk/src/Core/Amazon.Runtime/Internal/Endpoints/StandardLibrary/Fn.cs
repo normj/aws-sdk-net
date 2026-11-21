@@ -63,8 +63,20 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             if (path is null) throw new ArgumentNullException(nameof(path));
 #endif
 
+            // Most generated rules read one plain property, e.g. GetAttr(refs["PartitionResult"], "name").
+            // Look that up with the caller's string instead of copying it out of the path. This is the
+            // last-segment, no-indexer branch of the general path below, with the same exception.
+            if (path.Length > 0 && path.IndexOfAny(PathSeparators) < 0)
+            {
+                if (value is not IPropertyBag bag)
+                    throw new ArgumentException($"Object addressing by pathing segment must be IPropertyBag");
+                return bag[path];
+            }
+
             return GetAttr(value, path.AsSpan());
         }
+
+        private static readonly char[] PathSeparators = { '.', '[' };
 
         private static object GetAttr(object value, ReadOnlySpan<char> path)
         {
