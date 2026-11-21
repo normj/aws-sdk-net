@@ -95,7 +95,7 @@ namespace Amazon.Runtime.Internal
         /// request and response context.</param>
         protected static void PreInvoke(IExecutionContext executionContext)
         {
-            using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.SerializationDurationMetricName))
+            using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.SerializationDurationMetricName))
             {
                 var requestContext = executionContext.RequestContext;
 

@@ -90,16 +90,8 @@ namespace Amazon.Runtime.Telemetry.Metrics
         /// <returns>A disposable object that records the duration when disposed, or null when no meter provider is registered.</returns>
         public static IDisposable MeasureDuration(IRequestContext requestContext, string metricName, Attributes initialAttributes = null)
         {
-            if (IsNoOp(requestContext.ClientConfig))
-                return null;
-
-            if (initialAttributes == null)
-                initialAttributes = new Attributes();
-
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
-            initialAttributes.Set(TelemetryConstants.MethodAttributeKey, operationName);
-
-            return MeasureDuration(requestContext.ClientConfig, metricName, initialAttributes);
+            var measurement = StartDuration(requestContext, metricName, initialAttributes);
+            return measurement.IsActive ? new DurationMetricsMeasurer(measurement) : null;
         }
 
         /// <summary>
@@ -111,8 +103,37 @@ namespace Amazon.Runtime.Telemetry.Metrics
         /// <returns>A disposable object that records the duration when disposed, or null when no meter provider is registered.</returns>
         public static IDisposable MeasureDuration(IClientConfig config, string metricName, Attributes attributes = null)
         {
+            var measurement = StartDuration(config, metricName, attributes);
+            return measurement.IsActive ? new DurationMetricsMeasurer(measurement) : null;
+        }
+
+        /// <summary>
+        /// Same as <see cref="MeasureDuration(IRequestContext, string, Attributes)"/>, but returns the measurement as a
+        /// struct, so a <c>using</c> statement on the result allocates nothing for it. With the no-op meter provider
+        /// the result is an inactive measurement whose Dispose does nothing.
+        /// </summary>
+        internal static DurationMeasurement StartDuration(IRequestContext requestContext, string metricName, Attributes initialAttributes = null)
+        {
+            if (IsNoOp(requestContext.ClientConfig))
+                return default;
+
+            if (initialAttributes == null)
+                initialAttributes = new Attributes();
+
+            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
+            initialAttributes.Set(TelemetryConstants.MethodAttributeKey, operationName);
+
+            return StartDuration(requestContext.ClientConfig, metricName, initialAttributes);
+        }
+
+        /// <summary>
+        /// Same as <see cref="MeasureDuration(IClientConfig, string, Attributes)"/>, but returns the measurement as a
+        /// struct. With the no-op meter provider the result is an inactive measurement whose Dispose does nothing.
+        /// </summary>
+        internal static DurationMeasurement StartDuration(IClientConfig config, string metricName, Attributes attributes = null)
+        {
             if (IsNoOp(config))
-                return null;
+                return default;
 
             var serviceId = config.ServiceId;
 
@@ -124,24 +145,39 @@ namespace Amazon.Runtime.Telemetry.Metrics
             var scope = $"{TelemetryConstants.TelemetryScopePrefix}.{serviceId}";
             var meter = config.TelemetryProvider.MeterProvider.GetMeter(scope);
 
-            return new DurationMetricsMeasurer(meter, metricName, attributes);
+            return new DurationMeasurement(meter, metricName, attributes);
         }
 
-        private class DurationMetricsMeasurer: IDisposable
+        /// <summary>
+        /// A started duration measurement. Disposing it records the elapsed time, in seconds, into the histogram.
+        /// The default value is inactive and records nothing. Dispose each started measurement once, as a
+        /// <c>using</c> statement does.
+        /// </summary>
+        internal readonly struct DurationMeasurement : IDisposable
         {
             private readonly Histogram<double> _histogram;
             private readonly Attributes _attributes;
             private readonly DateTime _startTime;
+            private readonly bool _isActive;
 
-            public DurationMetricsMeasurer(Meter meter, string metricName, Attributes attributes)
+            public DurationMeasurement(Meter meter, string metricName, Attributes attributes)
             {
                 _histogram = meter.CreateHistogram<double>(metricName, TelemetryConstants.SecondsUnitName);
                 _attributes = attributes;
                 _startTime = AWSSDKUtils.CorrectedUtcNow;
+                _isActive = true;
             }
+
+            /// <summary>
+            /// True when this measurement was started with a meter provider other than the no-op provider.
+            /// </summary>
+            public bool IsActive => _isActive;
 
             public void Dispose()
             {
+                if (!_isActive)
+                    return;
+
                 // Record the duration in seconds using ticks precision to ensure high precision
                 // and to avoid data loss that may occur due to rounding when using seconds.
 
@@ -149,6 +185,21 @@ namespace Amazon.Runtime.Telemetry.Metrics
                 var durationInSeconds  = (double)ticks / TimeSpan.TicksPerSecond;
 
                 _histogram.Record(durationInSeconds, _attributes);
+            }
+        }
+
+        private class DurationMetricsMeasurer: IDisposable
+        {
+            private readonly DurationMeasurement _measurement;
+
+            public DurationMetricsMeasurer(DurationMeasurement measurement)
+            {
+                _measurement = measurement;
+            }
+
+            public void Dispose()
+            {
+                _measurement.Dispose();
             }
         }
     }

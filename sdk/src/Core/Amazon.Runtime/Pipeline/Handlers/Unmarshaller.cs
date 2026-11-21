@@ -227,7 +227,7 @@ namespace Amazon.Runtime.Internal
                 var unmarshaller = requestContext.Unmarshaller;
                 AmazonWebServiceResponse response = null;
                 using (requestContext.Metrics.StartEvent(Metric.ResponseUnmarshallTime))
-                using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.DeserializationDurationMetricName))
+                using (MetricsUtilities.StartDuration(requestContext, TelemetryConstants.DeserializationDurationMetricName))
                 {
                     response = unmarshaller.UnmarshallResponse(context);
                     InitializeEventInputStream(response, requestContext);
