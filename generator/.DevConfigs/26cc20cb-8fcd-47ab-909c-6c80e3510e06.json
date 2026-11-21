@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when unmarshalling JSON error responses by building the response body string once instead of on every access."
+    ]
+  }
+}
