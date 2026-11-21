@@ -31,6 +31,37 @@ namespace Amazon.Runtime.Internal
     /// </summary>
     public class BaseEndpointResolver : PipelineHandler
     {
+        // Endpoint providers build a new URL string for every request, and it is almost always the same URL as the
+        // previous request's. The last URL, its trailing-slash form and the Uri parsed from it are kept so an
+        // unchanged URL is neither concatenated nor parsed again. Strings and Uri instances are immutable, so
+        // sharing them between requests and threads is safe; each entry is replaced as a whole.
+        private UrlWithSlash _lastUrlWithSlash;
+        private ParsedEndpointUri _lastEndpointUri;
+
+        private sealed class UrlWithSlash
+        {
+            internal UrlWithSlash(string url, string urlWithSlash)
+            {
+                Url = url;
+                Value = urlWithSlash;
+            }
+
+            internal string Url { get; }
+            internal string Value { get; }
+        }
+
+        private sealed class ParsedEndpointUri
+        {
+            internal ParsedEndpointUri(string url, Uri uri)
+            {
+                Url = url;
+                Uri = uri;
+            }
+
+            internal string Url { get; }
+            internal Uri Uri { get; }
+        }
+
         public override void InvokeSync(IExecutionContext executionContext)
         {
             PreInvoke(executionContext);
@@ -58,7 +89,7 @@ namespace Amazon.Runtime.Internal
             var config = requestContext.ClientConfig;
 
             var endpoint = GetEndpoint(executionContext, parameters);
-            requestContext.Request.Endpoint = new Uri(endpoint.URL);
+            requestContext.Request.Endpoint = GetEndpointUri(endpoint.URL);
             requestContext.Request.EndpointAttributes = endpoint.Attributes;
 
             // If an explicit ServiceURL was provided, do not manipulate it based on UseHttp
@@ -135,9 +166,43 @@ namespace Amazon.Runtime.Internal
             // Ensure url ends with "/" to avoid signature mismatch issues.
             if (!endpoint.URL.EndsWith("/") && (string.IsNullOrEmpty(requestContext.Request.ResourcePath) || requestContext.Request.ResourcePath == "/"))
             {
-                endpoint.URL += "/";
+                endpoint.URL = AppendSlash(endpoint.URL);
             }
             return endpoint;
+        }
+
+        /// <summary>
+        /// Returns <c>new Uri(url)</c>, or the Uri parsed for the previous request when <paramref name="url"/> is
+        /// the same string.
+        /// </summary>
+        internal Uri GetEndpointUri(string url)
+        {
+            var cached = System.Threading.Volatile.Read(ref _lastEndpointUri);
+            if (cached != null && string.Equals(cached.Url, url, StringComparison.Ordinal))
+            {
+                return cached.Uri;
+            }
+
+            var uri = new Uri(url);
+            System.Threading.Volatile.Write(ref _lastEndpointUri, new ParsedEndpointUri(url, uri));
+            return uri;
+        }
+
+        /// <summary>
+        /// Returns <c>url + "/"</c>, or the string built for the previous request when <paramref name="url"/> is
+        /// the same string.
+        /// </summary>
+        internal string AppendSlash(string url)
+        {
+            var cached = System.Threading.Volatile.Read(ref _lastUrlWithSlash);
+            if (cached != null && string.Equals(cached.Url, url, StringComparison.Ordinal))
+            {
+                return cached.Value;
+            }
+
+            var value = url + "/";
+            System.Threading.Volatile.Write(ref _lastUrlWithSlash, new UrlWithSlash(url, value));
+            return value;
         }
 
         /// <summary>
