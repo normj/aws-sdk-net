@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations on .NET 8 and later by growing the request header dictionary once before the retry and signing headers are added."
+    ]
+  }
+}
