@@ -1043,12 +1043,51 @@ namespace Amazon.Runtime.Internal.Auth
             // Refer https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html. (Step #4: "Build the canonical headers list by sorting the (lowercase) headers by character code"). StringComparer.OrdinalIgnoreCase incorrectly places '_' after lowercase characters.
             int capacity = requestHeaders is ICollection<KeyValuePair<string, string>> c ? c.Count : 16;
             var sortedHeaders = new SortedList<string, string>(capacity, StringComparer.Ordinal);
-            foreach (var header in requestHeaders)
+            if (requestHeaders is Dictionary<string, string> dictionary)
             {
-                if (_headersToIgnoreWhenSigning.Contains(header.Key)) continue;
-                sortedHeaders.Add(header.Key.ToLowerInvariant(), header.Value);
+                // Request headers are a Dictionary; its struct enumerator avoids boxing an IEnumerator.
+                foreach (var header in dictionary)
+                {
+                    if (_headersToIgnoreWhenSigning.Contains(header.Key)) continue;
+                    sortedHeaders.Add(GetLowerInvariantHeaderName(header.Key), header.Value);
+                }
+            }
+            else
+            {
+                foreach (var header in requestHeaders)
+                {
+                    if (_headersToIgnoreWhenSigning.Contains(header.Key)) continue;
+                    sortedHeaders.Add(GetLowerInvariantHeaderName(header.Key), header.Value);
+                }
             }
             return sortedHeaders;
+        }
+
+        // Lowercased header names, so the same mixed-case names (Content-Type, X-Amz-Date, ...) are not lowercased
+        // into a new string on every request. Strings are immutable, so sharing one instance is not observable.
+        // Bounded: once full, further names are lowercased per call as before.
+        private const int LowerInvariantHeaderNameCacheLimit = 256;
+        private static readonly ConcurrentDictionary<string, string> _lowerInvariantHeaderNames = new(StringComparer.Ordinal);
+        private static int _lowerInvariantHeaderNameCount;
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Globalization", "CA1308:NormalizeStringsToUppercase", Justification = "SigV4 canonical header names are lowercase.")]
+        private static string GetLowerInvariantHeaderName(string name)
+        {
+            // ToLowerInvariant throws for null; keep that by not caching it.
+            if (name == null)
+                return name.ToLowerInvariant();
+
+            if (_lowerInvariantHeaderNames.TryGetValue(name, out var lower))
+                return lower;
+
+            lower = name.ToLowerInvariant();
+            // ConcurrentDictionary.Count takes every lock, so the bound is kept in a separate counter.
+            if (Volatile.Read(ref _lowerInvariantHeaderNameCount) < LowerInvariantHeaderNameCacheLimit
+                && _lowerInvariantHeaderNames.TryAdd(name, lower))
+            {
+                Interlocked.Increment(ref _lowerInvariantHeaderNameCount);
+            }
+            return lower;
         }
 
         /// <summary>

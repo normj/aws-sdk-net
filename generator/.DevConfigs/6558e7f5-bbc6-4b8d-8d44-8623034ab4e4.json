@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations in SigV4 signing by reusing lowercased header names in AWS4Signer.SortAndPruneHeaders."
+    ]
+  }
+}
