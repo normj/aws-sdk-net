@@ -49,9 +49,15 @@ namespace Amazon.Runtime.Internal.Transform
         private XmlTextReader _xmlTextReader;
         private readonly XmlPathBuffer pathBuffer = new XmlPathBuffer();
         private string currentAttributeName;
-        private Dictionary<string, string> attributeValues;
-        private List<string> attributeNames;
-        private IEnumerator<string> attributeEnumerator;
+        // The local names and values of the last element's attributes, in document order. The arrays are
+        // created for the first element with attributes and reused for later ones; attributeCount entries are
+        // valid. Read surfaces them one by one: attributeIndex is the number already surfaced.
+        private string[] attributeNames;
+        private string[] attributeValues;
+        private int attributeCount;
+        private int attributeIndex;
+        // Above this many attributes, duplicate local names are found with a Dictionary instead of a scan.
+        private const int AttributeScanLimit = 8;
         private XmlNodeType nodeType;
         private string nodeContent = String.Empty;
         private bool disposed = false;
@@ -274,7 +280,7 @@ namespace Amazon.Runtime.Internal.Transform
         {
             if (this.nodeType == XmlNodeType.Attribute)
             {
-                return (attributeValues[attributeEnumerator.Current]);
+                return attributeValues[attributeIndex - 1];
             }
             else
             {
@@ -300,12 +306,12 @@ namespace Amazon.Runtime.Internal.Transform
         /// </returns>
         public virtual bool Read()
         {
-            if (attributeEnumerator != null && attributeEnumerator.MoveNext())
+            if (attributeIndex < attributeCount)
             {
                 this.nodeType = XmlNodeType.Attribute;
                 // Positioned on an attribute: the element path is unchanged; CurrentPath/matching
                 // append "/@{name}" on demand via currentAttributeName.
-                this.currentAttributeName = attributeEnumerator.Current;
+                this.currentAttributeName = attributeNames[attributeIndex++];
             }
             else
             {
@@ -384,14 +390,55 @@ namespace Amazon.Runtime.Internal.Transform
         {
             if (XmlReader.HasAttributes)
             {
-                attributeValues = new Dictionary<string, string>();
-                attributeNames = new List<string>();
+                // Nothing is surfaced until every attribute has been read, as before.
+                attributeCount = 0;
+                attributeIndex = 0;
+                if (attributeNames == null)
+                {
+                    attributeNames = new string[4];
+                    attributeValues = new string[4];
+                }
+
+                int count = 0;
+                Dictionary<string, string> duplicateCheck = null;
                 while (XmlReader.MoveToNextAttribute())
                 {
-                    attributeValues.Add(XmlReader.LocalName, XmlReader.Value);
-                    attributeNames.Add(XmlReader.LocalName);
+                    string name = XmlReader.LocalName;
+                    string value = XmlReader.Value;
+
+                    // Local names must be unique, as when they were the keys of a Dictionary: a repeated name
+                    // (the same local name under two prefixes) throws Dictionary.Add's ArgumentException.
+                    if (duplicateCheck == null && count == AttributeScanLimit)
+                    {
+                        duplicateCheck = new Dictionary<string, string>();
+                        for (int i = 0; i < count; i++)
+                            duplicateCheck.Add(attributeNames[i], attributeValues[i]);
+                    }
+                    if (duplicateCheck != null)
+                    {
+                        duplicateCheck.Add(name, value);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < count; i++)
+                        {
+                            if (string.Equals(attributeNames[i], name))
+                            {
+                                ThrowDuplicateAttribute(count, name, value);
+                            }
+                        }
+                    }
+
+                    if (count == attributeNames.Length)
+                    {
+                        Array.Resize(ref attributeNames, count * 2);
+                        Array.Resize(ref attributeValues, count * 2);
+                    }
+                    attributeNames[count] = name;
+                    attributeValues[count] = value;
+                    count++;
                 }
-                attributeEnumerator = attributeNames.GetEnumerator();
+                attributeCount = count;
             }
             XmlReader.MoveToElement();
             XmlReader.Read();
@@ -400,6 +447,16 @@ namespace Amazon.Runtime.Internal.Transform
                 nodeContent = XmlReader.ReadContentAsString();
             else
                 nodeContent = String.Empty;
+        }
+
+        // Throws the ArgumentException that adding the attributes read so far, then the repeated one, to a
+        // Dictionary throws.
+        private void ThrowDuplicateAttribute(int count, string name, string value)
+        {
+            var attributes = new Dictionary<string, string>();
+            for (int i = 0; i < count; i++)
+                attributes.Add(attributeNames[i], attributeValues[i]);
+            attributes.Add(name, value);
         }
 
         #endregion

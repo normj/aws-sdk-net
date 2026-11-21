@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when unmarshalling XML responses by keeping element attributes in reused arrays instead of a new dictionary and list for every element that has attributes."
+    ]
+  }
+}
