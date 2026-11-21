@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of unmarshalling JSON epoch-second timestamps by parsing common number forms directly instead of through decimal on .NET 8 and later."
+    ]
+  }
+}
