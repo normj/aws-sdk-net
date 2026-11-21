@@ -415,6 +415,27 @@ namespace Amazon.Runtime.Internal.Auth
 
             // The x-amz-trailer HTTP header MUST be set with the value as comma-separated
             // string consisting of trailing header names in the order they are written on the HTTP request.
+            if (trailingHeaders.Count == 1)
+            {
+                // One name needs no sorting or joining; string.Join of a single element returns it (or "" for null).
+                if (trailingHeaders is Dictionary<string, string> dictionary)
+                {
+                    foreach (var key in dictionary.Keys)
+                    {
+                        headers[HeaderKeys.XAmzTrailerHeader] = key;
+                        return;
+                    }
+                }
+                else
+                {
+                    foreach (var key in trailingHeaders.Keys)
+                    {
+                        headers[HeaderKeys.XAmzTrailerHeader] = key ?? string.Empty;
+                        return;
+                    }
+                }
+            }
+
             headers[HeaderKeys.XAmzTrailerHeader] = string.Join(",", trailingHeaders.Keys.OrderBy(key => key).ToArray());
         }
 
