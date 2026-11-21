@@ -36,7 +36,12 @@ namespace Amazon.Runtime.Internal
     {
         readonly ParameterCollection parametersCollection;
         readonly IDictionary<string, string> parametersFacade;
-        readonly IDictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // A request that has been through the pipeline carries 9 to 10 headers (the marshalled ones plus
+        // invocation id, retry info, host, date, content hash, authorization, user agent, and the session
+        // token when there is one). Without an initial capacity the dictionary grows 3 -> 7 -> 17, allocating
+        // and copying three sets of arrays; starting at 16 (17 buckets) allocates one set.
+        private const int InitialHeadersCapacity = 16;
+        readonly IDictionary<string, string> headers = new Dictionary<string, string>(InitialHeadersCapacity, StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> trailingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> subResources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> pathResources = new Dictionary<string, string>(StringComparer.Ordinal);
