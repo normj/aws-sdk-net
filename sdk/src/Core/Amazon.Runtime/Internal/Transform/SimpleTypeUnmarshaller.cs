@@ -503,7 +503,14 @@ namespace Amazon.Runtime.Internal.Transform
         }
         public bool Unmarshall(JsonUnmarshallerContext context, ref StreamingUtf8JsonReader reader)
         {
-            return SimpleTypeUnmarshaller<bool>.Unmarshall(context, ref reader);
+            context.Read(ref reader);
+            // A JSON true/false token is the value itself; other tokens keep the text conversion.
+            if (context.CurrentTokenType == JsonTokenType.True)
+                return true;
+            if (context.CurrentTokenType == JsonTokenType.False)
+                return false;
+
+            return SimpleTypeUnmarshaller<bool>.UnmarshallCurrentToken(context, ref reader);
         }
     }
 
@@ -539,6 +546,11 @@ namespace Amazon.Runtime.Internal.Transform
         public bool? Unmarshall(JsonUnmarshallerContext context, ref StreamingUtf8JsonReader reader)
         {
             context.Read(ref reader);
+            if (context.CurrentTokenType == JsonTokenType.True)
+                return true;
+            if (context.CurrentTokenType == JsonTokenType.False)
+                return false;
+
             string text = context.ReadText(ref reader);
             if(string.IsNullOrEmpty(text))
             {
