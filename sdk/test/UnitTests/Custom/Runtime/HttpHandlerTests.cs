@@ -280,6 +280,47 @@ namespace AWSSDK.UnitTests
         }
 
         [TestMethod]
+        public void HttpClientResponseData_CopiesMoreHeadersThanTheOldInitialCapacity()
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[3]) };
+            var expected = new List<(string, string)>();
+            for (int i = 0; i < 40; i++)
+            {
+                response.Headers.TryAddWithoutValidation("x-amz-meta-h" + i, "v" + i);
+                expected.Add(("x-amz-meta-h" + i, "v" + i));
+            }
+            response.Headers.TryAddWithoutValidation("ETag", "\"abc\"");
+            expected.Add(("ETag", "\"abc\""));
+            response.Content.Headers.TryAddWithoutValidation("Content-Type", "text/plain");
+            expected.Add(("Content-Type", "text/plain"));
+            // Repeats a response header: skipped, so the count read up front is only an upper bound.
+            response.Content.Headers.TryAddWithoutValidation("X-AMZ-META-H7", "from-content");
+            expected.Add(("Content-Length", "3"));
+
+            var data = new HttpClientResponseData(response);
+
+            CollectionAssert.AreEqual(expected.Select(h => h.Item1).ToArray(), data.GetHeaderNames());
+            foreach (var (name, value) in expected)
+            {
+                Assert.AreEqual(value, data.GetHeaderValue(name), name);
+            }
+            Assert.AreEqual("v7", data.GetHeaderValue("x-amz-meta-h7"));
+        }
+
+        [TestMethod]
+        public void HttpClientResponseData_CopiesOnlyContentLengthWhenNoHeadersAreSet()
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            var data = new HttpClientResponseData(response);
+
+            CollectionAssert.AreEqual(new[] { "Content-Length" }, data.GetHeaderNames());
+            Assert.AreEqual("0", data.GetHeaderValue("content-length"));
+            Assert.AreEqual(0, data.ContentLength);
+            Assert.IsNull(data.ContentType);
+        }
+
+        [TestMethod]
         public void HttpClientResponseData_EventStreamConstructorHasNoHeaders()
         {
             var data = new HttpClientResponseData(new Dictionary<string, Amazon.Runtime.EventStreams.IEventStreamHeader>());
