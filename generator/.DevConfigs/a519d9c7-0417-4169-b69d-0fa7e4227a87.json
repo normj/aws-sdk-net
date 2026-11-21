@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for every response on .NET 8 and later by sizing the copied response header dictionary to the number of response headers."
+    ]
+  }
+}

@@ -95,7 +95,7 @@ namespace Amazon.Runtime.Internal.Transform
 
         private void CopyHeaderValues(HttpResponseMessage response)
         {
-            _headers = new Dictionary<string, string>(10, StringComparer.OrdinalIgnoreCase);
+            _headers = new Dictionary<string, string>(GetHeaderCapacity(response), StringComparer.OrdinalIgnoreCase);
 
             // The enumerated values are the same parsed values HttpHeaders.TryGetValues returns
             // for the key, so the first value is taken directly instead of looking the key up again.
@@ -114,6 +114,26 @@ namespace Amazon.Runtime.Internal.Transform
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns the initial capacity for the copied header dictionary. On .NET 8+ this is the number of
+        /// response and content header entries (an upper bound, since a content header that repeats a
+        /// response header is skipped), read through the non-validating view so nothing is parsed. The
+        /// dictionary then never resizes, and small responses do not get the fixed capacity of 10.
+        /// </summary>
+        private static int GetHeaderCapacity(HttpResponseMessage response)
+        {
+#if NET8_0_OR_GREATER
+            var count = response.Headers.NonValidated.Count;
+            if (response.Content != null)
+            {
+                count += response.Content.Headers.NonValidated.Count;
+            }
+            return count;
+#else
+            return 10;
+#endif
         }
 
         private static string GetFirstValue(IEnumerable<string> values)
