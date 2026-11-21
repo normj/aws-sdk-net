@@ -46,6 +46,11 @@ namespace Amazon.Runtime.Internal.Transform
         };
 
         private StreamReader streamReader;
+        // The stream the XML is read from. The StreamReader over it, with its 1 KB byte buffer and 2 KB char
+        // buffer, is created the first time the XML is read. Responses whose members are all in headers (S3
+        // PutObject, HeadObject, DeleteObject) and streaming responses that hand Stream to the caller (S3
+        // GetObject) never read the XML, so they never allocate it. Null once the context is disposed.
+        private Stream readerStream;
         private XmlTextReader _xmlTextReader;
         private readonly XmlPathBuffer pathBuffer = new XmlPathBuffer();
         private string currentAttributeName;
@@ -61,7 +66,14 @@ namespace Amazon.Runtime.Internal.Transform
         {
             get
             {
-                return streamReader.BaseStream;
+                if (readerStream == null)
+                {
+                    // Disposed. streamReader is null here, so this throws the NullReferenceException that reading
+                    // BaseStream of the released reader always threw.
+                    return streamReader.BaseStream;
+                }
+
+                return readerStream;
             }
         }
 
@@ -77,6 +89,12 @@ namespace Amazon.Runtime.Internal.Transform
             {
                 if (_xmlTextReader == null)
                 {
+                    // Once disposed, readerStream is null and XmlTextReader gets the null reader, as before.
+                    if (streamReader == null && readerStream != null)
+                    {
+                        streamReader = new StreamReader(readerStream);
+                    }
+
                     _xmlTextReader = new XmlTextReader(streamReader);
                     _xmlTextReader.WhitespaceHandling = WhitespaceHandling.All;
                     _xmlTextReader.DtdProcessing = DtdProcessing.Ignore;
@@ -143,7 +161,14 @@ namespace Amazon.Runtime.Internal.Transform
                 }
             }
 
-            streamReader = new StreamReader(this.FlexibleChecksumStream ?? responseStream);
+            var stream = this.FlexibleChecksumStream ?? responseStream;
+            if (stream == null || !stream.CanRead)
+            {
+                // Let StreamReader throw the same ArgumentNullException or ArgumentException it always has.
+                streamReader = new StreamReader(stream);
+            }
+
+            readerStream = stream;
 
             this.WebResponseData = responseData;
             this.MaintainResponseBody = maintainResponseBody;
@@ -415,6 +440,12 @@ namespace Amazon.Runtime.Internal.Transform
                         streamReader.Dispose();
                         streamReader = null;
                     }
+                    else if (readerStream != null)
+                    {
+                        // The StreamReader was never created. Close the stream as StreamReader.Dispose would have.
+                        readerStream.Close();
+                    }
+                    readerStream = null;
                     if (_xmlTextReader != null)
                     {
 #if NETSTANDARD
