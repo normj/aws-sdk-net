@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for failed requests when no SDK log adaptor is enabled, by not building the retry and error handler log arguments, and by checking plain inner exception chains without a queue."
+    ]
+  }
+}

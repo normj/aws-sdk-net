@@ -53,6 +53,27 @@ namespace AWSSDK.Runtime.Internal.Util
             where T : Exception
         {
             inner = null;
+
+            // Common case: a plain InnerException chain with no AggregateException. The breadth-first
+            // search below visits exactly this chain in order, so walk it without allocating a queue.
+            // The root itself is not checked, as below. On reaching an AggregateException, fall back
+            // to the full search from the root; the nodes already visited were not matches.
+            var current = exception;
+            while (!(current is AggregateException))
+            {
+                current = current.InnerException;
+                if (current == null)
+                {
+                    return false;
+                }
+
+                inner = current as T;
+                if (inner != null)
+                {
+                    return true;
+                }
+            }
+
             Queue<Exception> queue = new Queue<Exception>();
 
             //Modified BFS for the specific exception type

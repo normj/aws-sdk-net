@@ -147,7 +147,8 @@ namespace Amazon.Runtime.Internal
         private bool ProcessException(IExecutionContext executionContext, Exception exception)
         {
             // Log the exception
-            this.Logger.Error(exception, "An exception of type {0} was handled in ErrorHandler.", exception.GetType().Name);
+            if (IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel.Error))
+                this.Logger.Error(exception, "An exception of type {0} was handled in ErrorHandler.", exception.GetType().Name);
             executionContext.RequestContext.Metrics.AddProperty(Metric.Exception, exception);
 
             // Find the matching handler which can process the exception
@@ -186,7 +187,8 @@ namespace Amazon.Runtime.Internal
         private async System.Threading.Tasks.Task<bool> ProcessExceptionAsync(IExecutionContext executionContext, Exception exception)
         {
             // Log the exception
-            this.Logger.Error(exception, "An exception of type {0} was handled in ErrorHandler.", exception.GetType().Name);
+            if (IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel.Error))
+                this.Logger.Error(exception, "An exception of type {0} was handled in ErrorHandler.", exception.GetType().Name);
             executionContext.RequestContext.Metrics.AddProperty(Metric.Exception, exception);
 
             // Find the matching handler which can process the exception
