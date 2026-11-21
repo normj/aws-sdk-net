@@ -1,0 +1,9 @@
+{
+  "core": {
+    "changeLogMessages": [
+      "Reduced per-attempt allocations: cache amz-sdk-request header values, store clock skew corrections without allocating, and skip the response-body cancellation registration for tokens that cannot be canceled."
+    ],
+    "type": "patch",
+    "updateMinimum": false
+  }
+}
