@@ -183,7 +183,9 @@ namespace Amazon.Runtime.Internal
                     using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.ResolveIdentityDurationMetricName))
                     using (requestContext.Metrics.StartEvent(Metric.CredentialsRequestTime))
                     {
-                        immutableCredentials = await awsCredentials.GetCredentialsAsync().ConfigureAwait(false);
+                        // Cached or synchronous credentials are read without allocating a task.
+                        if (!awsCredentials.TryGetCredentialsWithoutTask(out immutableCredentials))
+                            immutableCredentials = await awsCredentials.GetCredentialsAsync().ConfigureAwait(false);
                     }
                 }
 

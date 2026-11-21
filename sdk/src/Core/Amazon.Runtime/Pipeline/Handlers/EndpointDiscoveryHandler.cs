@@ -79,7 +79,9 @@ namespace Amazon.Runtime.Internal
             ImmutableCredentials immutableCredentials = null;
             if (requestContext.Identity is AWSCredentials credentials)
             {
-                immutableCredentials = await credentials.GetCredentialsAsync().ConfigureAwait(false);
+                // Cached or synchronous credentials are read without allocating a task.
+                if (!credentials.TryGetCredentialsWithoutTask(out immutableCredentials))
+                    immutableCredentials = await credentials.GetCredentialsAsync().ConfigureAwait(false);
             }
 
             PreInvoke(executionContext, immutableCredentials);
