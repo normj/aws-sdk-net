@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Made lowercase hex encoding in AWSSDKUtils.ToHex faster on .NET 10+ by using Convert.ToHexStringLower."
+    ]
+  }
+}
