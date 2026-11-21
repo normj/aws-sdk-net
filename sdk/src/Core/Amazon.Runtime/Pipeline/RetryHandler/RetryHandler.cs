@@ -415,7 +415,8 @@ namespace Amazon.Runtime.Internal
         }
 
 #if NET8_0_OR_GREATER
-        // Headers a SigV4 request gains after the retry handler first runs: amz-sdk-invocation-id, amz-sdk-request,
+        // Headers a typical SigV4 request gains after the retry handler first runs (the exact set depends on the auth
+        // scheme, checksum mode and service): amz-sdk-invocation-id, amz-sdk-request,
         // host, X-Amz-Date, X-Amz-Content-SHA256, Authorization, User-Agent, X-Amz-Security-Token (session
         // credentials) and one request checksum header.
         private const int HeadersAddedByLaterHandlers = 9;
