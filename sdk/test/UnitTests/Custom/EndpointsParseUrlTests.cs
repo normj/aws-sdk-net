@@ -113,6 +113,26 @@ namespace AWSSDK.UnitTests
         }
 
         [TestMethod]
+        public void UrlsWithUserInfoOrLongUrlsAreNotCached()
+        {
+            var withUserInfo = "https://user:secret@userinfo.example.com/x";
+            var longUrl = "https://long.example.com/" + new string('a', 3000);
+            for (int call = 0; call < 2; call++)
+            {
+                Assert.AreEqual(Describe(OriginalParseURL(withUserInfo)), Describe(Fn.ParseURL(withUserInfo)));
+                Assert.AreEqual(Describe(OriginalParseURL(longUrl)), Describe(Fn.ParseURL(longUrl)));
+            }
+
+            var cache = typeof(Fn).GetField("_parsedUrls", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (cache != null)
+            {
+                var dictionary = (System.Collections.Generic.IDictionary<string, URL>)cache.GetValue(null);
+                Assert.IsFalse(dictionary.ContainsKey(withUserInfo));
+                Assert.IsFalse(dictionary.ContainsKey(longUrl));
+            }
+        }
+
+        [TestMethod]
         public void ConcurrentCallsReturnCorrectResults()
         {
             Parallel.For(0, 2000, i =>

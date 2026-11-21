@@ -318,7 +318,9 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
             }
 
             var result = ParseURLUncached(url);
-            if (result != null && _parsedUrls.Count < MaxCachedUrls)
+            // URLs with user info are not kept, so credentials embedded in an endpoint do not outlive
+            // the client that supplied them. Very long URLs are not kept either.
+            if (result != null && url.Length <= MaxCachedUrlLength && url.IndexOf('@') < 0 && _parsedUrls.Count < MaxCachedUrls)
             {
                 _parsedUrls.TryAdd(url, new URL(result));
             }
@@ -327,6 +329,7 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
 
         // Bounds the cache for callers that pass many different endpoints.
         private const int MaxCachedUrls = 128;
+        private const int MaxCachedUrlLength = 2048;
 
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, URL> _parsedUrls =
             new System.Collections.Concurrent.ConcurrentDictionary<string, URL>(StringComparer.Ordinal);
