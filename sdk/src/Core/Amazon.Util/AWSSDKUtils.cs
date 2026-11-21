@@ -872,6 +872,14 @@ namespace Amazon.Util
             }
 #endif
 
+#if NET10_0_OR_GREATER
+            // Vectorized BCL encoder, same characters. A null array keeps the path below and its exception.
+            if (data != null)
+            {
+                return Convert.ToHexStringLower(data);
+            }
+#endif
+
 #if NETCOREAPP3_1_OR_GREATER
             return string.Create(data.Length * 2, (data, lowercase), static (chars, state) =>
             {
