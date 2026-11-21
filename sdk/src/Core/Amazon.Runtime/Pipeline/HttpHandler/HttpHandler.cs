@@ -100,7 +100,9 @@ namespace Amazon.Runtime.Internal
                         catch (Exception ex)
                         {
                             CompleteFailedRequest(httpRequest);
-                            traceSpan.CaptureException(ex);
+                            // Skip building exception details (including the stack trace) the no-op span discards.
+                            if (!(traceSpan is NoOpTraceSpan))
+                                traceSpan.CaptureException(ex);
                             throw;
                         }
                     }
@@ -245,7 +247,9 @@ namespace Amazon.Runtime.Internal
                         }
                         catch (Exception e)
                         {
-                            traceSpan.CaptureException(e);
+                            // Skip building exception details (including the stack trace) the no-op span discards.
+                            if (!(traceSpan is NoOpTraceSpan))
+                                traceSpan.CaptureException(e);
                             edi = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e);
                         }
 
