@@ -117,6 +117,49 @@ namespace AWSSDK.UnitTests.Custom.Marshalling
 
         [TestMethod]
         [TestCategory("UnitTest")]
+        public void UnmarshalJsonErrorDetectsXmlBodyAfterLeadingSpaces()
+        {
+            RunJsonErrorUnmarshallingTest("   " + ValidXml, null, null, "xmlMessage", "ServiceUnavailable", ErrorType.Receiver);
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public void UnmarshalJsonErrorBodyWithLeadingSpacesIsQuotedVerbatim()
+        {
+            RunJsonErrorUnmarshallingTest("   " + UnstructuredText, "type", null, "The service returned an error with Error Code type and HTTP Body:    " + UnstructuredText, "type", ErrorType.Unknown);
+            RunJsonErrorUnmarshallingTest("   " + UnstructuredText, null, null, "The service returned an error with HTTP Body:    " + UnstructuredText, null, ErrorType.Unknown);
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public void UnmarshalJsonErrorWhitespaceOnlyBody()
+        {
+            RunJsonErrorUnmarshallingTest("    ", null, null, "The service returned an error with HTTP Body:     ", null, ErrorType.Unknown);
+        }
+
+        /// <summary>
+        /// On the exception path (isException: true) the whole body is cached; a body with no message
+        /// must still be quoted in full, including what follows the root value.
+        /// </summary>
+        [TestMethod]
+        [TestCategory("UnitTest")]
+        public void UnmarshalJsonErrorExceptionContextQuotesFullBody()
+        {
+            var body = "{\"__type\":\"com.amazon#SomeError:extra\"}" + new string(' ', 5000) + "x";
+            var webResponse = new WebResponseData { StatusCode = HttpStatusCode.BadRequest };
+            webResponse.Headers.Add("Content-Length", Encoding.UTF8.GetBytes(body).Length.ToString());
+
+            var stream = AWSSDK_DotNet.UnitTests.Utils.CreateStreamFromString(body);
+            var context = new JsonUnmarshallerContext(stream, false, webResponse, isException: true);
+            var reader = new StreamingUtf8JsonReader(context.Stream);
+            var response = new JsonErrorResponseUnmarshaller().Unmarshall(context, ref reader);
+
+            Assert.AreEqual("SomeError", response.Code);
+            Assert.AreEqual("The service returned an error with Error Code SomeError and HTTP Body: " + body, response.Message);
+        }
+
+        [TestMethod]
+        [TestCategory("UnitTest")]
         public void UnmarshalXmlErrorValidXml()
         {
             RunXmlErrorUnmarshallingTest(ValidXml, "xmlMessage", "ServiceUnavailable", ErrorType.Receiver);

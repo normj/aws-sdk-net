@@ -64,13 +64,16 @@ namespace Amazon.Runtime.Internal.Transform
             // The reader does not touch the stream until its first Read(), so only now has the start of the body been
             // buffered into context.ResponseBody. A body that starts with '<' is an XML error document (an XML body
             // fails the JSON read above without consuming anything but the first buffer): unmarshall it as XML.
-            for (int i = 0; i < context.ResponseBody.Length; i++)
+            // The body has been read to the end, so it no longer changes; build the string once rather than
+            // on every access, since each read of context.ResponseBody copies and decodes the whole body.
+            string responseBody = context.ResponseBody;
+            for (int i = 0; i < responseBody.Length; i++)
             {
-                if (context.ResponseBody[i] == 32) // skip whitespace
+                if (responseBody[i] == 32) // skip whitespace
                     continue;
                 else
                 {
-                    if (context.ResponseBody[i] == 60) //starts with '<' so assuming XML.
+                    if (responseBody[i] == 60) //starts with '<' so assuming XML.
                     {
                         XmlErrorResponseUnmarshaller xmlUnmarshaller = new XmlErrorResponseUnmarshaller();
                         using (var stream = new MemoryStream(context.GetResponseBodyBytes()))
@@ -123,17 +126,17 @@ namespace Amazon.Runtime.Internal.Transform
             {
                 if (string.IsNullOrEmpty(type))
                 {
-                    if (string.IsNullOrEmpty(context.ResponseBody))
+                    if (string.IsNullOrEmpty(responseBody))
                         message = "The service returned an error. See inner exception for details.";
                     else
-                        message = "The service returned an error with HTTP Body: " + context.ResponseBody;
+                        message = "The service returned an error with HTTP Body: " + responseBody;
                 }
                 else
                 {
-                    if (string.IsNullOrEmpty(context.ResponseBody))
+                    if (string.IsNullOrEmpty(responseBody))
                         message = "The service returned an error with Error Code " + type + ".";
                     else
-                        message = "The service returned an error with Error Code " + type + " and HTTP Body: " + context.ResponseBody;
+                        message = "The service returned an error with Error Code " + type + " and HTTP Body: " + responseBody;
                 }
             }
 
