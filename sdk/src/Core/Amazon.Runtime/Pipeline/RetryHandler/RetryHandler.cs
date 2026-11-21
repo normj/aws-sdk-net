@@ -414,6 +414,13 @@ namespace Amazon.Runtime.Internal
             return false;
         }
 
+#if NET8_0_OR_GREATER
+        // Headers a SigV4 request gains after the retry handler first runs: amz-sdk-invocation-id, amz-sdk-request,
+        // host, X-Amz-Date, X-Amz-Content-SHA256, Authorization, User-Agent, X-Amz-Security-Token (session
+        // credentials) and one request checksum header.
+        private const int HeadersAddedByLaterHandlers = 9;
+#endif
+
         private void SetRetryHeaders(IRequestContext requestContext)
         {
             var request = requestContext.Request;
@@ -421,6 +428,14 @@ namespace Amazon.Runtime.Internal
             //The invocation id will be the same for all retry requests for the initial operation invocation.
             if (!request.Headers.ContainsKey(HeaderKeys.AmzSdkInvocationId))
             {
+#if NET8_0_OR_GREATER
+                // First attempt: the marshalled headers are in place, and the rest of the pipeline adds up to
+                // HeadersAddedByLaterHandlers more. Growing the dictionary to that size once avoids growing it
+                // step by step (3 -> 7 -> 17 for a typical request), which allocates and copies a new set of
+                // arrays each time. Capacity does not change the dictionary's contents or enumeration order.
+                if (request.Headers is System.Collections.Generic.Dictionary<string, string> headers)
+                    headers.EnsureCapacity(headers.Count + HeadersAddedByLaterHandlers);
+#endif
                 request.Headers.Add(HeaderKeys.AmzSdkInvocationId, requestContext.InvocationId.ToString());
             }
 
