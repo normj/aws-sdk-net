@@ -405,11 +405,11 @@ namespace Amazon.Runtime.Internal.Transform
             }
             else if (currentToken.Value == JsonTokenType.EndObject || currentToken.Value == JsonTokenType.EndArray)
             {
-                if (stack.Peek().SegmentType == PathSegmentType.Delimiter)
+                if (stack.TopIsDelimiter)
                 {
                     // Pop '/' associated with corresponding object start and array start.
                     stack.Pop();
-                    if (stack.Count > 0 && stack.Peek().SegmentType != PathSegmentType.Delimiter)
+                    if (stack.Count > 0 && !stack.TopIsDelimiter)
                     {
                         // Pop the property name segment sitting beneath the closed scope.
                         stack.Pop();
@@ -437,7 +437,7 @@ namespace Amazon.Runtime.Internal.Transform
                 string t = ReadText(ref reader);
                 stack.PushPropertyName(t);
             }
-            else if (currentToken.Value != JsonTokenType.None && stack.Peek().SegmentType != PathSegmentType.Delimiter)
+            else if (currentToken.Value != JsonTokenType.None && !stack.TopIsDelimiter)
             {
                 // Pop the property name segment when its value (scalar/null) follows it.
                 stack.Pop();
@@ -472,21 +472,17 @@ namespace Amazon.Runtime.Internal.Transform
             base.Dispose(disposing);
         }
 
-        private enum PathSegmentType
-        {
-            Value,
-            Delimiter
-        }
-
-        private struct PathSegment
-        {
-            internal PathSegmentType SegmentType { get; set; }
-            internal int Length { get; set; }
-        }
-
         private class JsonPathStack : IDisposable
         {
-            private readonly Stack<PathSegment> stack = new Stack<PathSegment>();
+            // Thrown from, so that peeking at or popping an empty path throws exactly what Stack<T> throws.
+            private static readonly Stack<int> EmptyStack = new Stack<int>();
+
+            // One entry per pushed segment: the UTF-8 length of a property name (0 or more), or Delimiter for a
+            // '/' pushed by an object or array start. A plain array instead of a Stack<T>, because every token
+            // of every JSON response pushes, peeks at or pops a segment.
+            private const int Delimiter = -1;
+            private int[] segments = new int[8];
+            private int count = 0;
             int currentDepth = 0;
             // The current path as UTF-8 bytes. Delimiters and property names are appended as they
             // are read and trimmed back off (by adjusting pathLength) as their scopes close. The
@@ -518,7 +514,7 @@ namespace Amazon.Runtime.Internal.Transform
                 EnsureCapacity(1);
                 pathBytes[pathLength++] = (byte)'/';
                 stackString = null;
-                stack.Push(new PathSegment { SegmentType = PathSegmentType.Delimiter, Length = 1 });
+                PushSegment(Delimiter);
             }
 
             internal void PushPropertyName(ReadOnlySpan<byte> utf8Name)
@@ -527,7 +523,7 @@ namespace Amazon.Runtime.Internal.Transform
                 utf8Name.CopyTo(pathBytes.AsSpan(pathLength));
                 pathLength += utf8Name.Length;
                 stackString = null;
-                stack.Push(new PathSegment { SegmentType = PathSegmentType.Value, Length = utf8Name.Length });
+                PushSegment(utf8Name.Length);
             }
 
             internal void PushPropertyName(string name)
@@ -537,20 +533,38 @@ namespace Amazon.Runtime.Internal.Transform
                 Encoding.UTF8.GetBytes(name, 0, name.Length, pathBytes, pathLength);
                 pathLength += byteCount;
                 stackString = null;
-                stack.Push(new PathSegment { SegmentType = PathSegmentType.Value, Length = byteCount });
+                PushSegment(byteCount);
             }
 
-            internal PathSegment Pop()
+            internal void Pop()
             {
-                var segment = this.stack.Pop();
-                if (segment.SegmentType == PathSegmentType.Delimiter)
+                if (count == 0)
                 {
-                    currentDepth--;
+                    EmptyStack.Pop();
                 }
 
-                pathLength -= segment.Length;
+                int segment = segments[--count];
+                if (segment == Delimiter)
+                {
+                    currentDepth--;
+                    pathLength -= 1;
+                }
+                else
+                {
+                    pathLength -= segment;
+                }
+
                 stackString = null;
-                return segment;
+            }
+
+            private void PushSegment(int segment)
+            {
+                if (count == segments.Length)
+                {
+                    Array.Resize(ref segments, segments.Length * 2);
+                }
+
+                segments[count++] = segment;
             }
 
             /// <summary>
@@ -581,14 +595,25 @@ namespace Amazon.Runtime.Internal.Transform
                 }
             }
 
-            internal PathSegment Peek()
+            /// <summary>
+            /// Whether the last pushed segment is a delimiter. Throws as Stack&lt;T&gt;.Peek does when the path is empty.
+            /// </summary>
+            internal bool TopIsDelimiter
             {
-                return this.stack.Peek();
+                get
+                {
+                    if (count == 0)
+                    {
+                        EmptyStack.Peek();
+                    }
+
+                    return segments[count - 1] == Delimiter;
+                }
             }
 
             public int Count
             {
-                get { return this.stack.Count; }
+                get { return this.count; }
             }
         }
     }
