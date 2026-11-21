@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations by creating a request's parameter collection and event stream header list only when they are used, and by skipping the before-request event arguments when no handler is subscribed."
+    ]
+  }
+}
