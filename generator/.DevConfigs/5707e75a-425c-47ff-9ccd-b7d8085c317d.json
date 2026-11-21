@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of matching JSON response member names on .NET 8 and later by comparing ASCII names without transcoding them to UTF-8 on every check."
+    ]
+  }
+}
