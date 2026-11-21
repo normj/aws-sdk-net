@@ -1,0 +1,9 @@
+{
+  "core": {
+    "changeLogMessages": [
+      "Improved performance of endpoint resolution for clients with a custom service URL by reusing the parsed URL instead of parsing it with System.Uri on every request."
+    ],
+    "type": "patch",
+    "updateMinimum": false
+  }
+}
