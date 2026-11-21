@@ -83,6 +83,16 @@ namespace Amazon.Runtime.Internal
         }
 
         /// <summary>
+        /// False only when <see cref="Logger"/> is the SDK logger and none of its adaptors is enabled for
+        /// <paramref name="level"/>, so the log call would do nothing. Callers use this to skip building
+        /// the log arguments. Any other logger implementation is always called.
+        /// </summary>
+        internal bool IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel level)
+        {
+            return !(this.Logger is Logger sdkLogger) || sdkLogger.IsEnabled(level);
+        }
+
+        /// <summary>
         /// Logs the metrics for the current execution context.
         /// </summary>
         /// <param name="executionContext">The execution context, it contains the

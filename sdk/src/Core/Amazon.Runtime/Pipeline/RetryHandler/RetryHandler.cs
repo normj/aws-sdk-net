@@ -329,6 +329,9 @@ namespace Amazon.Runtime.Internal
 
         private void LogForError(IRequestContext requestContext, Exception exception)
         {
+            if (!IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel.Error))
+                return;
+
             Logger.Error(exception, "{0} making request {1} to {2}. Attempt {3}.",
                           exception.GetType().Name,
                           requestContext.RequestName,
@@ -355,7 +358,8 @@ namespace Amazon.Runtime.Internal
             var isStaleConnectionError = this.RetryPolicy.IsStaleConnectionError(exception);
             var canRetry = this.RetryPolicy.CanRetry(executionContext);
             
-            Logger.DebugFormat(
+            if (IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel.Debug))
+                Logger.DebugFormat(
                 "Retry check: IsStaleConnectionError={0}, CanRetry={1}, staleConnectionRetries={2}, maxStaleConnectionRetries={3}, IsRequestStreamRewindable={4}",
                 isStaleConnectionError,
                 canRetry,
@@ -367,7 +371,8 @@ namespace Amazon.Runtime.Internal
                 staleConnectionRetries < maxStaleConnectionRetries &&
                 canRetry)
             {
-                Logger.DebugFormat(
+                if (IsLogEnabled(Amazon.Runtime.Logging.SdkLogLevel.Debug))
+                    Logger.DebugFormat(
                     "Detected stale pooled connection error ({0}). Automatic retry {1} of {2} for request {3}",
                     exception.GetType().Name,
                     staleConnectionRetries + 1,
