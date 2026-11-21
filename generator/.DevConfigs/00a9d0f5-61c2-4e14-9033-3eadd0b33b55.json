@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for small XML responses by sizing the XML unmarshaller context's StreamReader buffer to a Content-Length under 1 KB."
+    ]
+  }
+}

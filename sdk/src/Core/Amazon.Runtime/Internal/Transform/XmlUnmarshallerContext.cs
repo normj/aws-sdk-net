@@ -45,6 +45,10 @@ namespace Amazon.Runtime.Internal.Transform
             XmlNodeType.Whitespace
         };
 
+        // StreamReader's default buffer size in bytes, and the smallest it uses (it raises smaller sizes to this).
+        private const int DefaultStreamReaderBufferSize = 1024;
+        private const int MinStreamReaderBufferSize = 128;
+
         private StreamReader streamReader;
         private XmlTextReader _xmlTextReader;
         private readonly XmlPathBuffer pathBuffer = new XmlPathBuffer();
@@ -124,6 +128,7 @@ namespace Amazon.Runtime.Internal.Transform
             {
                 responseStream = this.WrappingStream;
             }
+            int streamReaderBufferSize = 0;
             // If the unmarshaller context is being called internally without there being a http response then the response data would be null
             if (responseData != null)
             {
@@ -134,6 +139,14 @@ namespace Amazon.Runtime.Internal.Transform
                 {
                     IsEmptyResponse = true;
                 }
+
+                // StreamReader's default 1 KB byte buffer comes with a 1,025-char buffer, about 3 KB in all. A body
+                // known to be smaller, and not compressed, fits in a buffer of its own size.
+                if (parsedContentLengthHeader && contentLength >= 0 && contentLength < DefaultStreamReaderBufferSize &&
+                    string.IsNullOrEmpty(responseData.GetHeaderValue("Content-Encoding")))
+                {
+                    streamReaderBufferSize = Math.Max((int)contentLength, MinStreamReaderBufferSize);
+                }
                 // Validate flexible checksums if we know the content length and the behavior was opted in to on the request
                 if (parsedContentLengthHeader && responseData.ContentLength == contentLength &&
                         string.IsNullOrEmpty(responseData.GetHeaderValue("Content-Encoding")) &&
@@ -143,7 +156,15 @@ namespace Amazon.Runtime.Internal.Transform
                 }
             }
 
-            streamReader = new StreamReader(this.FlexibleChecksumStream ?? responseStream);
+            if (streamReaderBufferSize == 0)
+            {
+                streamReader = new StreamReader(this.FlexibleChecksumStream ?? responseStream);
+            }
+            else
+            {
+                // The encoding and BOM detection that StreamReader(Stream) uses, with a smaller buffer.
+                streamReader = new StreamReader(this.FlexibleChecksumStream ?? responseStream, Encoding.UTF8, true, streamReaderBufferSize);
+            }
 
             this.WebResponseData = responseData;
             this.MaintainResponseBody = maintainResponseBody;
