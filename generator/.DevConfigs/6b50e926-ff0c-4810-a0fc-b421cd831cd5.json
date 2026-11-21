@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of writing XML request bodies by searching for characters that need extra escaping with a vectorized search on .NET 8 and later."
+    ]
+  }
+}
