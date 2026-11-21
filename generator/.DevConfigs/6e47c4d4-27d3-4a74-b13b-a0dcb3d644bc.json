@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations in signed chunked uploads on .NET 8+ by signing each SigV4 chunk without building per-chunk strings."
+    ]
+  }
+}
