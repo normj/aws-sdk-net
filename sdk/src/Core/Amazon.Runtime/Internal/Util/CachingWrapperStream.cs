@@ -50,7 +50,8 @@ namespace Amazon.Runtime.Internal.Util
             get
             {
                 var limit = _cacheLimit ?? AWSConfigs.LoggingConfig.LogResponsesSizeLimit;
-                return AllReadBytes.Take(limit).ToList();
+                // Same result as AllReadBytes.Take(limit).ToList(), copied in one block.
+                return AllReadBytes.GetRange(0, Math.Max(0, Math.Min(limit, AllReadBytes.Count)));
             }
         }
 
@@ -110,17 +111,15 @@ namespace Amazon.Runtime.Internal.Util
                     int remainingBytes = _cacheLimit.Value - _cachedBytes;
                     int bytesToCache = Math.Min(numberOfBytesRead, remainingBytes);
 
-                    var readBytes = new byte[bytesToCache];
-                    System.Array.Copy(buffer, offset, readBytes, 0, bytesToCache);
-                    AllReadBytes.AddRange(readBytes);
+                    // ArraySegment is an ICollection<byte>, so AddRange copies the range straight
+                    // into the list without a temporary array.
+                    AllReadBytes.AddRange(new ArraySegment<byte>(buffer, offset, bytesToCache));
                     _cachedBytes += bytesToCache;
                 }
             }
             else
             {
-                var readBytes = new byte[numberOfBytesRead];
-                System.Array.Copy(buffer, offset, readBytes, 0, numberOfBytesRead);
-                AllReadBytes.AddRange(readBytes);
+                AllReadBytes.AddRange(new ArraySegment<byte>(buffer, offset, numberOfBytesRead));
             }
         }
 
