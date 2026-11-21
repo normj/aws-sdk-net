@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations for asynchronous requests by reading basic, session, environment-variable and cached refreshing credentials without allocating a task."
+    ]
+  }
+}
