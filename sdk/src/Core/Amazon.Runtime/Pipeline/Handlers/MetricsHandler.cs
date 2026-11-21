@@ -35,8 +35,8 @@ namespace Amazon.Runtime.Internal
             if (TracingUtilities.IsNoOp(requestContext.ClientConfig))
                 return TracingUtilities.NoOpSpan;
 
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
-            var spanName = $"{requestContext.ServiceMetaData.ServiceId}.{operationName}";
+            var requestName = requestContext.RequestName;
+            var spanName = TelemetryNameCache.GetCallSpanName(requestContext.ServiceMetaData.ServiceId, requestName);
             return TracingUtilities.CreateSpan(requestContext, spanName, null, SpanKind.CLIENT);
         }
 

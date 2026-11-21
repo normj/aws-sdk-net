@@ -63,7 +63,7 @@ namespace Amazon.Runtime.Telemetry.Tracing
                 initialAttributes = new Attributes();
 
             // Add common attributes
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
+            var operationName = TelemetryNameCache.GetOperationName(requestContext.RequestName);
             initialAttributes.Set(TelemetryConstants.MethodAttributeKey, operationName);
 
             initialAttributes.Set(TelemetryConstants.SystemAttributeKey, TelemetryConstants.SystemAttributeValue);
@@ -71,7 +71,7 @@ namespace Amazon.Runtime.Telemetry.Tracing
 
             var tracerProvider = requestContext.ClientConfig.TelemetryProvider.TracerProvider;
 
-            var scope = $"{TelemetryConstants.TelemetryScopePrefix}.{serviceId}";
+            var scope = TelemetryNameCache.GetScope(serviceId);
             var tracer = tracerProvider.GetTracer(scope);
 
             return tracer.CreateSpan(spanName, initialAttributes, spanKind, parentContext);
