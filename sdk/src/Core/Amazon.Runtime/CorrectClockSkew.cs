@@ -67,7 +67,9 @@ namespace Amazon.Runtime
         // ConcurrentDictionary gives lock-free reads (every signed request reads this via
         // GetCorrectedUtcNowForEndpoint) and per-bucket striped writes, so ClientSkew is recorded
         // on every response without serializing all endpoints through a single global write lock.
-        private static readonly ConcurrentDictionary<string, TimeSpan> clockCorrectionDictionary = new ConcurrentDictionary<string, TimeSpan>();
+        // The correction is stored as ticks: ConcurrentDictionary updates a long value in place on 64-bit
+        // processes, while a TimeSpan value makes it allocate a new node on every update (every response).
+        private static readonly ConcurrentDictionary<string, long> clockCorrectionDictionary = new ConcurrentDictionary<string, long>();
 
         /// <summary>
         /// Return clock skew correction value for an endpoint if there is one.
@@ -79,7 +81,7 @@ namespace Amazon.Runtime
         /// <returns>Clock correction value for an endpoint in TimeSpan.  TimeSpan.Zero if no such clock correction is set.</returns>
         public static TimeSpan GetClockCorrectionForEndpoint(string endpoint)
         {
-            return clockCorrectionDictionary.TryGetValue(endpoint, out var span) ? span : TimeSpan.Zero;
+            return clockCorrectionDictionary.TryGetValue(endpoint, out var ticks) ? new TimeSpan(ticks) : TimeSpan.Zero;
         }
 
         /// <summary>
@@ -129,7 +131,7 @@ namespace Amazon.Runtime
 
         internal static void SetClockCorrectionForEndpoint(string endpoint, TimeSpan correction)
         {
-            clockCorrectionDictionary[endpoint] = correction;
+            clockCorrectionDictionary[endpoint] = correction.Ticks;
         }
     }
 }
