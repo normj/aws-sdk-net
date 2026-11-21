@@ -13,8 +13,10 @@
  * permissions and limitations under the License.
  */
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading;
 
 namespace Amazon.Runtime.Endpoints
 {
@@ -44,9 +46,7 @@ namespace Amazon.Runtime.Endpoints
 
             if (!string.IsNullOrEmpty(attributesJson))
             {
-                using JsonDocument doc = JsonDocument.Parse(attributesJson);
-                var attributes = doc.RootElement;
-                Attributes = PropertyBag.FromJsonElement(attributes);
+                Attributes = ParseAttributes(attributesJson);
             }
 
             if (!string.IsNullOrEmpty(headersJson))
@@ -67,6 +67,41 @@ namespace Amazon.Runtime.Endpoints
                     Headers.Add(key.Name, headerValues);
                 }
             }
+        }
+
+        // Generated endpoint providers build the attributes JSON per request, but the text only
+        // varies with a few inputs (region, auth scheme, signing name), so the same strings repeat.
+        // Successfully parsed attribute trees are kept here by JSON text and every caller gets its
+        // own deep copy, so a cached tree is never reachable outside this class. Invalid JSON is
+        // never cached, so it keeps throwing on every call.
+        private const int MaxCachedAttributes = 256;
+        private const int MaxCachedAttributesLength = 4096;
+        private static readonly ConcurrentDictionary<string, PropertyBag> _parsedAttributesCache =
+            new ConcurrentDictionary<string, PropertyBag>(StringComparer.Ordinal);
+        private static int _parsedAttributesCacheCount;
+
+        private static PropertyBag ParseAttributes(string attributesJson)
+        {
+            PropertyBag cached;
+            if (_parsedAttributesCache.TryGetValue(attributesJson, out cached))
+            {
+                return cached.DeepCopy();
+            }
+
+            PropertyBag parsed;
+            using (JsonDocument doc = JsonDocument.Parse(attributesJson))
+            {
+                parsed = PropertyBag.FromJsonElement(doc.RootElement);
+            }
+
+            if (attributesJson.Length <= MaxCachedAttributesLength &&
+                Volatile.Read(ref _parsedAttributesCacheCount) < MaxCachedAttributes &&
+                _parsedAttributesCache.TryAdd(attributesJson, parsed.DeepCopy()))
+            {
+                Interlocked.Increment(ref _parsedAttributesCacheCount);
+            }
+
+            return parsed;
         }
 
         /// <summary>
