@@ -349,6 +349,19 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         public static string Interpolate(string template, Dictionary<string, object> refs)
         {
+            // Generated endpoint providers pass string literals, so the parsed form of each template
+            // is cached by reference. Anything the parser cannot take (including null and malformed
+            // templates) goes through the original code, which throws the original exceptions.
+            var parsed = InterpolationTemplate.Get(template);
+            if (parsed != null)
+            {
+                return parsed.Render(refs);
+            }
+            return InterpolateUncached(template, refs);
+        }
+
+        private static string InterpolateUncached(string template, Dictionary<string, object> refs)
+        {
             const char OpenBracket = '{';
             const char CloseBracket = '}';
             const char Hash = '#';
@@ -414,6 +427,204 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         }
 
         /// <summary>
+        /// A template for <see cref="Interpolate"/> split into literal text and placeholders, so a
+        /// call does not rescan the template or allocate a string per placeholder name.
+        /// </summary>
+        private sealed class InterpolationTemplate
+        {
+            // Bounds the cache for callers that build templates at run time; generated code uses
+            // a few hundred literals at most per process.
+            private const int MaxCachedTemplates = 1024;
+
+            private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, InterpolationTemplate> _cache =
+                new System.Collections.Concurrent.ConcurrentDictionary<string, InterpolationTemplate>(ReferenceComparer.Instance);
+
+            // Literal is set for literal text; otherwise RefName is the refs key and Path, when not
+            // null, is the GetAttr path. SimplePath means Path is one property name.
+            private readonly struct Part
+            {
+                internal Part(string literal, string refName, string path, bool simplePath)
+                {
+                    Literal = literal;
+                    RefName = refName;
+                    Path = path;
+                    SimplePath = simplePath;
+                }
+
+                internal readonly string Literal;
+                internal readonly string RefName;
+                internal readonly string Path;
+                internal readonly bool SimplePath;
+            }
+
+            private readonly Part[] _parts;
+            private readonly int _initialCapacity;
+
+            private InterpolationTemplate(Part[] parts, int initialCapacity)
+            {
+                _parts = parts;
+                _initialCapacity = initialCapacity;
+            }
+
+            internal static InterpolationTemplate Get(string template)
+            {
+                if (template == null)
+                {
+                    return null;
+                }
+
+                if (_cache.TryGetValue(template, out var parsed))
+                {
+                    return parsed;
+                }
+
+                if (_cache.Count >= MaxCachedTemplates)
+                {
+                    return null;
+                }
+
+                parsed = Parse(template);
+                if (parsed != null)
+                {
+                    _cache.TryAdd(template, parsed);
+                }
+                return parsed;
+            }
+
+            /// <summary>
+            /// Mirrors the scan in InterpolateUncached. Returns null wherever that code throws.
+            /// </summary>
+            private static InterpolationTemplate Parse(string template)
+            {
+                const char OpenBracket = '{';
+                const char CloseBracket = '}';
+                const char Hash = '#';
+
+                var parts = new List<Part>();
+                var literal = new StringBuilder();
+                var remainder = template.AsSpan();
+                while (remainder.Length > 0)
+                {
+                    var specialPos = remainder.IndexOfAny(OpenBracket, CloseBracket);
+                    if (specialPos < 0)
+                    {
+                        AppendSpan(literal, remainder);
+                        break;
+                    }
+
+                    if (specialPos > 0)
+                    {
+                        AppendSpan(literal, remainder.Slice(0, specialPos));
+                        remainder = remainder.Slice(specialPos);
+                    }
+
+                    var currentChar = remainder[0];
+                    var nextChar = remainder.Length > 1 ? remainder[1] : default(char);
+
+                    if (currentChar == nextChar)
+                    {
+                        literal.Append(currentChar);
+                        remainder = remainder.Slice(2);
+                        continue;
+                    }
+
+                    if (currentChar == CloseBracket)
+                        return null;
+
+                    var closingBracket = remainder.IndexOf(CloseBracket);
+                    if (closingBracket < 0)
+                        return null;
+
+                    if (literal.Length > 0)
+                    {
+                        parts.Add(new Part(literal.ToString(), null, null, false));
+                        literal.Clear();
+                    }
+
+                    var segment = remainder.Slice(1, closingBracket - 1);
+                    var hashPos = segment.IndexOf(Hash);
+                    if (hashPos >= 0)
+                    {
+                        var refName = segment.Slice(0, hashPos).ToString();
+                        segment = segment.Slice(hashPos + 1);
+
+                        // If there is a secondary hash, we only want the path up to that point
+                        var secondaryHashPos = segment.IndexOf(Hash);
+                        if (secondaryHashPos >= 0)
+                            segment = segment.Slice(0, secondaryHashPos);
+
+                        var simplePath = segment.Length > 0 && segment.IndexOfAny('.', '[') < 0;
+                        parts.Add(new Part(null, refName, segment.ToString(), simplePath));
+                    }
+                    else
+                    {
+                        parts.Add(new Part(null, segment.ToString(), null, false));
+                    }
+                    remainder = remainder.Slice(closingBracket + 1);
+                }
+
+                if (literal.Length > 0)
+                {
+                    parts.Add(new Part(literal.ToString(), null, null, false));
+                }
+
+                return new InterpolationTemplate(parts.ToArray(), template.Length);
+            }
+
+            private static void AppendSpan(StringBuilder builder, ReadOnlySpan<char> value)
+            {
+#if NETCOREAPP3_1_OR_GREATER
+                builder.Append(value);
+#else
+                builder.Append(value.ToString());
+#endif
+            }
+
+            internal string Render(Dictionary<string, object> refs)
+            {
+                var parts = _parts;
+                if (parts.Length == 1 && parts[0].Literal != null)
+                {
+                    return parts[0].Literal;
+                }
+
+                using var result = new ValueStringBuilder(_initialCapacity);
+                foreach (var part in parts)
+                {
+                    if (part.Literal != null)
+                    {
+                        result.Append(part.Literal);
+                    }
+                    else if (part.Path == null)
+                    {
+                        result.Append(refs[part.RefName].ToString());
+                    }
+                    else if (part.SimplePath)
+                    {
+                        // Same as GetAttr for a path with no '.' or '[': one property bag lookup.
+                        if (refs[part.RefName] is not IPropertyBag bag)
+                            throw new ArgumentException($"Object addressing by pathing segment must be IPropertyBag");
+                        result.Append(bag[part.Path].ToString());
+                    }
+                    else
+                    {
+                        result.Append(GetAttr(refs[part.RefName], part.Path.AsSpan()).ToString());
+                    }
+                }
+                return result.ToString();
+            }
+
+            private sealed class ReferenceComparer : IEqualityComparer<string>
+            {
+                internal static readonly ReferenceComparer Instance = new ReferenceComparer();
+
+                public bool Equals(string x, string y) => ReferenceEquals(x, y);
+
+                public int GetHashCode(string obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+            }
+        }
+
+        /// <summary>
         /// Interpolate all templates in all string nodes for given json
         /// </summary>
         public static string InterpolateJson(string json, Dictionary<string, object> refs)
@@ -473,7 +684,8 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
                     break;
 
                 case JsonValueKind.String:
-                    var interpolated = Interpolate(element.GetString(), refs);
+                    // The string is new on every call, so caching its parsed form would only fill the cache.
+                    var interpolated = InterpolateUncached(element.GetString(), refs);
                     writer.WriteStringValue(interpolated);
                     break;
 

@@ -1,0 +1,9 @@
+{
+  "core": {
+    "changeLogMessages": [
+      "Improved performance of endpoint URL interpolation by caching the parsed form of each endpoint template, so placeholders no longer allocate a lookup string on every request."
+    ],
+    "type": "patch",
+    "updateMinimum": false
+  }
+}
