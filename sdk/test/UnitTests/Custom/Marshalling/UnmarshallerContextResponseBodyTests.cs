@@ -104,7 +104,9 @@ namespace AWSSDK.UnitTests.Custom.Marshalling
             var buffer = new byte[100];
             if (!readAll)
             {
-                stream.Read(buffer, 0, 7);
+                // MemoryStream returns everything requested that is available.
+                int n = stream.Read(buffer, 0, 7);
+                Assert.IsTrue(n <= 7);
                 return;
             }
             while (stream.Read(buffer, 0, buffer.Length) > 0) { }
