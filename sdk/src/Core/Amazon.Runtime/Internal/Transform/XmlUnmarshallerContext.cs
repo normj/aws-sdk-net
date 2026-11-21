@@ -237,6 +237,18 @@ namespace Amazon.Runtime.Internal.Transform
             if (expression.Equals("."))
                 return true;
 
+            if (currentAttributeName == null)
+            {
+                // Generated unmarshallers test every member name in turn until one matches, so most calls
+                // are misses. The path must have a '/' just before the last expression.Length chars, which a
+                // name of a different length than the current element's almost never has. Checking that
+                // first rejects those names before the depth is computed. The checks below are the same.
+                var elementPath = pathBuffer.PathSpan;
+                int separator = elementPath.Length - expression.Length - 1;
+                if (separator < 0 || elementPath[separator] != '/')
+                    return false;
+            }
+
             // Count '/' separators to derive the required depth, matching the base algorithm exactly.
             int requiredDepth = startingStackDepth;
             for (int i = expression.IndexOf('/'); i > -1; i = expression.IndexOf('/', i + 1))
