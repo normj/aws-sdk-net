@@ -63,6 +63,47 @@ namespace Amazon.Runtime.Endpoints
             }
         }
 
+        private PropertyBag(int capacity)
+        {
+            properties = new Dictionary<string, object>(capacity);
+        }
+
+        /// <summary>
+        /// Creates a deep copy of a bag built by <see cref="FromJsonElement(JsonElement)"/>. Nested bags and
+        /// lists are copied; strings and boxed numbers and booleans are immutable and are shared.
+        /// </summary>
+        internal PropertyBag DeepCopy()
+        {
+            var copy = new PropertyBag(properties.Count);
+            foreach (var kvp in properties)
+            {
+                copy.properties.Add(kvp.Key, DeepCopyValue(kvp.Value));
+            }
+            return copy;
+        }
+
+        private static object DeepCopyValue(object value)
+        {
+            var bag = value as PropertyBag;
+            if (bag != null)
+            {
+                return bag.DeepCopy();
+            }
+
+            var list = value as List<object>;
+            if (list != null)
+            {
+                var listCopy = new List<object>(list.Count);
+                foreach (var item in list)
+                {
+                    listCopy.Add(DeepCopyValue(item));
+                }
+                return listCopy;
+            }
+
+            return value;
+        }
+
         /// <summary>
         /// Returns true when <paramref name="other"/> holds exactly the same properties and values as this bag.
         /// Values are compared with <see cref="object.Equals(object, object)"/>.
