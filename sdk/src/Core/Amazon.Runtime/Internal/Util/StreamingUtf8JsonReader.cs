@@ -63,6 +63,32 @@ namespace Amazon.Runtime.Internal.Util
         /// <returns>True if the current token value matches <paramref name="text"/>.</returns>
         public bool ValueTextEquals(string text)
         {
+#if NET8_0_OR_GREATER
+            // Generated unmarshallers call this once per candidate member name for every property in
+            // the response, and almost every call is a mismatch. Utf8JsonReader transcodes the text to
+            // UTF-8 on each call before comparing. For an unescaped property name or string held in
+            // one span, the bytes are compared directly instead:
+            // - Equal lengths: equal exactly when every byte is the ASCII char at the same position,
+            //   because any non-ASCII char needs more than one UTF-8 byte.
+            // - Different lengths with all-ASCII text: the UTF-8 form of the text has text.Length
+            //   bytes, so it cannot equal the value.
+            // Anything else (escaped value, non-ASCII text, other token types) uses Utf8JsonReader,
+            // which also throws for token types that have no text.
+            if (text != null && !_reader.ValueIsEscaped && !_reader.HasValueSequence &&
+                (_reader.TokenType == JsonTokenType.PropertyName || _reader.TokenType == JsonTokenType.String))
+            {
+                ReadOnlySpan<byte> value = _reader.ValueSpan;
+                if (value.Length == text.Length)
+                {
+                    return System.Text.Ascii.Equals(value, text.AsSpan());
+                }
+
+                if (System.Text.Ascii.IsValid(text.AsSpan()))
+                {
+                    return false;
+                }
+            }
+#endif
             // Pass the chars as a span. netstandard2.0 has no implicit string -> ReadOnlySpan<char>
             // conversion, so AsSpan() is used explicitly; it is allocation-free.
             return _reader.ValueTextEquals(text.AsSpan());
