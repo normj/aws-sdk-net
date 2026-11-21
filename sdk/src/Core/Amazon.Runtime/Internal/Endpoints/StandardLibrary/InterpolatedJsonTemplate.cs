@@ -35,8 +35,10 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         // Generated endpoint providers pass string literals, so the same template instance repeats on every
         // request. Keyed by reference: lookups do not hash the text, and a template that is not a literal
         // simply misses. A null value marks a template that is not cached and takes the original path.
-        private const int MaxCachedTemplates = 1024;
-        private const int MaxCachedTemplateLength = 8192;
+        private const int MaxCachedTemplates = 256;
+        private const int MaxCachedTemplateLength = 4096;
+        // Longer values take the writer path, so its own length limits still apply.
+        private const int MaxFastPathValueLength = 4096;
         private static readonly ConcurrentDictionary<string, InterpolatedJsonTemplate> _cache =
             new ConcurrentDictionary<string, InterpolatedJsonTemplate>(ReferenceComparer.Instance);
         private static int _cacheCount;
@@ -70,9 +72,10 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
 
             var result = uncached(json, refs);
 
-            if (Volatile.Read(ref _cacheCount) < MaxCachedTemplates)
+            // Over-length templates are never added, so the cache never holds a large string alive.
+            if (json.Length <= MaxCachedTemplateLength && Volatile.Read(ref _cacheCount) < MaxCachedTemplates)
             {
-                template = json.Length <= MaxCachedTemplateLength ? TryCreate(json, refs, result) : null;
+                template = TryCreate(json, refs, result);
                 if (_cache.TryAdd(json, template))
                 {
                     Interlocked.Increment(ref _cacheCount);
@@ -138,6 +141,10 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         // Characters the default JSON encoder never escapes. Anything else takes the writer path.
         private static bool IsPlainAscii(string value)
         {
+            if (value.Length > MaxFastPathValueLength)
+            {
+                return false;
+            }
             foreach (var c in value)
             {
                 if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||

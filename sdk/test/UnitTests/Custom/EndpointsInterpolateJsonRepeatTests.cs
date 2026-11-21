@@ -154,6 +154,16 @@ namespace AWSSDK.UnitTests
             @"{""a"":""{Region#name}""}",
         };
 
+        [ClassInitialize]
+        public static void WarmGeneratedShapes(TestContext context)
+        {
+            // Use the generated template shapes before NonLiteralTemplatesMatchOriginal fills the capped cache.
+            for (int i = 0; i < 5; i++)
+            {
+                Fn.InterpolateJson(Templates[i], Refs("us-west-2"));
+            }
+        }
+
         [TestMethod]
         [TestCategory("Endpoints")]
         public void RepeatedTemplatesMatchOriginal()
@@ -182,7 +192,7 @@ namespace AWSSDK.UnitTests
                 values.Add(((char)c).ToString());
                 values.Add("us-west-2" + (char)c + "a");
             }
-            values.AddRange(new[] { "", "\ud83d\ude00", "\u2028\u2029", "\ufeff", "a\"b\\c", "\ud800", "x\udc00y", new string('a', 5000) + "\u00e9" });
+            values.AddRange(new[] { "", "\ud83d\ude00", "\u2028\u2029", "\ufeff", "a\"b\\c", "\ud800", "x\udc00y", new string('a', 5000) + "\u00e9", new string('a', 5000), new string('a', 4096), new string('a', 4097) });
 
             for (int round = 0; round < 2; round++)
             {
@@ -216,15 +226,22 @@ namespace AWSSDK.UnitTests
         [TestCategory("Endpoints")]
         public void NonLiteralTemplatesMatchOriginal()
         {
-            for (int i = 0; i < 1500; i++)
+            for (int i = 0; i < 600; i++)
             {
                 var template = "{\"i\":" + i + ",\"r\":\"{Region}\",\"s\":\"" + Guid.NewGuid().ToString("N") + "\"}";
                 AssertParity(template, Refs("us-west-2"));
                 AssertParity(template, Refs("eu-west-1"));
             }
-            var longTemplate = "{\"long\":\"" + new string('a', 20000) + "{Region}\"}";
+            var longTemplate = "{\"long\":\"" + new string('a', 5000) + "{Region}\"}";
             AssertParity(longTemplate, Refs("us-west-2"));
             AssertParity(longTemplate, Refs("eu-west-1"));
+
+            var type = typeof(Fn).Assembly.GetType("Amazon.Runtime.Internal.Endpoints.StandardLibrary.InterpolatedJsonTemplate");
+            if (type != null)
+            {
+                var cache = (System.Collections.IDictionary)type.GetField("_cache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null);
+                Assert.IsFalse(cache.Contains(longTemplate), "over-length templates must not be kept alive by the cache");
+            }
         }
 
         [TestMethod]
