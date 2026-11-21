@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved performance of unmarshalling JSON boolean values by reading the true/false token directly instead of converting through a string."
+    ]
+  }
+}
