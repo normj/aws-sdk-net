@@ -1,0 +1,9 @@
+{
+  "core": {
+    "changeLogMessages": [
+      "Reduced per-request allocations and time for operations that use endpoint discovery (for example Amazon Timestream): an unchanged discovered address reuses the previously parsed Uri, and the endpoint cache key is built without intermediate strings."
+    ],
+    "type": "patch",
+    "updateMinimum": false
+  }
+}
