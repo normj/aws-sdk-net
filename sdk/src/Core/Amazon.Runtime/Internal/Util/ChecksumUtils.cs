@@ -73,7 +73,23 @@ namespace Amazon.Runtime.Internal.Util
         /// <returns>Name of the HTTP header key for the given algorithm</returns>
         internal static string GetChecksumHeaderKey(CoreChecksumAlgorithm checksumAlgorithm)
         {
-            return $"{_checksumHeaderPrefix}{checksumAlgorithm.ToString().ToLower()}";
+            // Constant names for the defined values, which are what the expression below produces for them under
+            // any culture (no name contains 'I', the only letter whose lowercase form is culture-dependent).
+            switch (checksumAlgorithm)
+            {
+                case CoreChecksumAlgorithm.NONE: return "x-amz-checksum-none";
+                case CoreChecksumAlgorithm.CRC32C: return "x-amz-checksum-crc32c";
+                case CoreChecksumAlgorithm.CRC32: return "x-amz-checksum-crc32";
+                case CoreChecksumAlgorithm.SHA256: return "x-amz-checksum-sha256";
+                case CoreChecksumAlgorithm.SHA1: return "x-amz-checksum-sha1";
+                case CoreChecksumAlgorithm.CRC64NVME: return "x-amz-checksum-crc64nvme";
+                case CoreChecksumAlgorithm.MD5: return "x-amz-checksum-md5";
+                case CoreChecksumAlgorithm.SHA512: return "x-amz-checksum-sha512";
+                case CoreChecksumAlgorithm.XXHASH128: return "x-amz-checksum-xxhash128";
+                case CoreChecksumAlgorithm.XXHASH3: return "x-amz-checksum-xxhash3";
+                case CoreChecksumAlgorithm.XXHASH64: return "x-amz-checksum-xxhash64";
+                default: return $"{_checksumHeaderPrefix}{checksumAlgorithm.ToString().ToLower()}";
+            }
         }
 
         /// <summary>

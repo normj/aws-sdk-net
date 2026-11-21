@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations when signing requests with a single trailing checksum header by skipping the sort and join and by using constant checksum header names."
+    ]
+  }
+}
