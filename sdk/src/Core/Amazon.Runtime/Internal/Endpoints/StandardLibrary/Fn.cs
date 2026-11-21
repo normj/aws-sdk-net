@@ -309,6 +309,30 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
         /// </summary>
         public static URL ParseURL(string url)
         {
+            // Rules call ParseURL(refs["Endpoint"]) on every request when the client has a custom
+            // endpoint, and that string rarely changes. Parsing is a pure function of the string, so
+            // successful results are kept and each caller gets its own (mutable) copy.
+            if (url != null && _parsedUrls.TryGetValue(url, out var cached))
+            {
+                return new URL(cached);
+            }
+
+            var result = ParseURLUncached(url);
+            if (result != null && _parsedUrls.Count < MaxCachedUrls)
+            {
+                _parsedUrls.TryAdd(url, new URL(result));
+            }
+            return result;
+        }
+
+        // Bounds the cache for callers that pass many different endpoints.
+        private const int MaxCachedUrls = 128;
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, URL> _parsedUrls =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, URL>(StringComparer.Ordinal);
+
+        private static URL ParseURLUncached(string url)
+        {
             Uri uri;
             Uri.TryCreate(url, UriKind.Absolute, out uri);
             if (uri == null || uri.Query?.Length > 0 || !SupportedSchemas.Contains(uri.Scheme))

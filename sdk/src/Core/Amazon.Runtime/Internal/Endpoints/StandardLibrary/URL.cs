@@ -22,6 +22,17 @@ namespace Amazon.Runtime.Internal.Endpoints.StandardLibrary
     /// </summary>
     public class URL : PropertyBag
     {
+        public URL()
+        {
+        }
+
+        /// <summary>
+        /// Creates a URL holding a copy of the properties in <paramref name="source"/>.
+        /// </summary>
+        internal URL(URL source) : base(source)
+        {
+        }
+
         /// <summary>
         /// URL scheme
         /// </summary>
