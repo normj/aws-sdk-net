@@ -52,7 +52,7 @@ namespace AWSSDK.UnitTests
             Assert.AreEqual("Content-Type", headers.Keys.Single(), "Replacing a value keeps the first key's casing");
             Assert.AreEqual("text/plain", headers["Content-Type"]);
 
-            Assert.ThrowsException<ArgumentException>(() => headers.Add("content-type", "x"));
+            Assert.ThrowsExactly<ArgumentException>(() => headers.Add("content-type", "x"));
         }
 
         [TestMethod]
@@ -113,8 +113,8 @@ namespace AWSSDK.UnitTests
         public void Headers_NullKeyThrowsAsBefore()
         {
             var headers = NewRequest().Headers;
-            Assert.ThrowsException<ArgumentNullException>(() => headers[null] = "x");
-            Assert.ThrowsException<ArgumentNullException>(() => headers.ContainsKey(null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => headers[null] = "x");
+            Assert.ThrowsExactly<ArgumentNullException>(() => headers.ContainsKey(null));
             headers["A"] = null;
             Assert.IsNull(headers["a"]);
         }
