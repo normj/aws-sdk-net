@@ -255,21 +255,57 @@ namespace Amazon.Runtime.Internal
                 return null;
             }
 
-            var schemeNames = authSchemes.OfType<PropertyBag>().Select(scheme => (string)scheme["name"]).ToList();
+            // Endpoint attributes parsed from the rules JSON hold arrays as List<object>. Read that list by index, so
+            // the common single-scheme case allocates nothing; any other IList takes the original enumeration.
+            if (!(authSchemes is List<object> schemeList))
+            {
+                return ToAuthSchemeOptions(authSchemes.OfType<PropertyBag>().Select(scheme => (string)scheme["name"]).ToList());
+            }
 
+            string firstSchemeName = null;
+            List<string> schemeNames = null;
+            var schemeCount = 0;
+            for (var i = 0; i < schemeList.Count; i++)
+            {
+                if (schemeList[i] is PropertyBag scheme)
+                {
+                    var schemeName = (string)scheme["name"];
+                    if (schemeCount == 0)
+                    {
+                        firstSchemeName = schemeName;
+                    }
+                    else
+                    {
+                        if (schemeNames == null)
+                        {
+                            schemeNames = new List<string> { firstSchemeName };
+                        }
+                        schemeNames.Add(schemeName);
+                    }
+                    schemeCount++;
+                }
+            }
+
+            if (schemeCount == 1)
+            {
+                return GetDefaultAuthSchemeOptions(firstSchemeName) ?? ToAuthSchemeOptions(new List<string> { firstSchemeName });
+            }
+
+            return ToAuthSchemeOptions(schemeNames ?? new List<string>());
+        }
+
+        /// <summary>
+        /// Converts the scheme names read from an endpoint's authSchemes attribute to auth options.
+        /// </summary>
+        private static List<IAuthSchemeOption> ToAuthSchemeOptions(List<string> schemeNames)
+        {
             // If there's only one scheme, we'll try to return one of the default collections to avoid extra allocations.
             if (schemeNames.Count == 1)
             {
-                var schemeName = schemeNames.First();
-                switch (schemeName)
+                var defaultOptions = GetDefaultAuthSchemeOptions(schemeNames[0]);
+                if (defaultOptions != null)
                 {
-                    case "sigv4":
-                    case "sigv4-s3express":
-                        return AuthSchemeOption.DEFAULT_SIGV4;
-                    case "sigv4a":
-                        return AuthSchemeOption.DEFAULT_SIGV4A;
-                    default:
-                        break;
+                    return defaultOptions;
                 }
             }
             
@@ -293,6 +329,23 @@ namespace Amazon.Runtime.Internal
                 }
             }
             return options;
+        }
+
+        /// <summary>
+        /// Returns the shared default option list for a single known scheme name, or null for any other name.
+        /// </summary>
+        private static List<IAuthSchemeOption> GetDefaultAuthSchemeOptions(string schemeName)
+        {
+            switch (schemeName)
+            {
+                case "sigv4":
+                case "sigv4-s3express":
+                    return AuthSchemeOption.DEFAULT_SIGV4;
+                case "sigv4a":
+                    return AuthSchemeOption.DEFAULT_SIGV4A;
+                default:
+                    return null;
+            }
         }
 
         /// <summary>
