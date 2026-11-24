@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations in SigV4 signing by hashing the canonical request without creating a string for it when request metrics are disabled."
+    ]
+  }
+}
