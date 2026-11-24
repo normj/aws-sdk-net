@@ -235,6 +235,21 @@ namespace AWSSDK.UnitTests
             }
         }
 
+        [TestMethod]
+        public void RecordsOneCallAttemptDurationPerAttempt()
+        {
+            var meterProvider = new RecordingMeterProvider();
+            var config = new AmazonS3Config { TelemetryProvider = new DefaultTelemetryProvider() };
+            config.TelemetryProvider.RegisterMeterProvider(meterProvider);
+
+            var httpHandler = new HttpHandler<Stream>(CreateListBucketsFactory(), callbackSender);
+            _ = new RuntimePipeline(httpHandler);
+            var executionContext = CreateExecutionContextForListBuckets(config);
+            httpHandler.InvokeSync(executionContext);
+
+            CollectionAssert.AreEqual(new[] { TelemetryConstants.CallAttemptDurationMetricName }, meterProvider.RecordedHistograms);
+        }
+
 #if !NETFRAMEWORK
         [TestMethod]
         public void HttpClientResponseData_CopiesFirstValueOfEachHeader()
@@ -332,6 +347,7 @@ namespace AWSSDK.UnitTests
         private class RecordingMeterProvider : MeterProvider
         {
             public List<long> BytesReceived { get; } = new List<long>();
+            public List<string> RecordedHistograms { get; } = new List<string>();
             public override Meter GetMeter(string scope, Attributes attributes = null) => new RecordingMeter(this);
 
             private class RecordingMeter : NoOpMeter
@@ -340,6 +356,16 @@ namespace AWSSDK.UnitTests
                 public RecordingMeter(RecordingMeterProvider provider) { _provider = provider; }
                 public override MonotonicCounter<T> CreateMonotonicCounter<T>(string name, string units = null, string description = null)
                     => name == TelemetryConstants.HTTPBytesReceivedMetricName ? new Counter<T>(_provider) : base.CreateMonotonicCounter<T>(name, units, description);
+                public override Histogram<T> CreateHistogram<T>(string name, string units = null, string description = null)
+                    => new RecordingHistogram<T>(_provider, name);
+            }
+
+            private class RecordingHistogram<T> : Histogram<T> where T : struct
+            {
+                private readonly RecordingMeterProvider _provider;
+                private readonly string _name;
+                public RecordingHistogram(RecordingMeterProvider provider, string name) { _provider = provider; _name = name; }
+                public override void Record(T value, Attributes attributes = null) => _provider.RecordedHistograms.Add(_name);
             }
 
             private class Counter<T> : MonotonicCounter<T> where T : struct
