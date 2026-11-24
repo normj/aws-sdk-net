@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Improved endpoint resolution performance by caching parsed endpoint attributes (each endpoint gets its own copy) and parsing endpoint attributes and headers with a single Utf8JsonReader pass instead of JsonDocument."
+    ]
+  }
+}
