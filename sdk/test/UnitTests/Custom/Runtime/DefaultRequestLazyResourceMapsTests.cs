@@ -232,8 +232,12 @@ namespace AWSSDK.UnitTests
             inner.AddSubResource("acl");
             inner.AddPathResource("{Bucket}", "b");
             inner.TrailingHeaders["x"] = "y";
-            IRequest wrapper = System.Reflection.DispatchProxy.Create<IRequest, ForwardingRequest>();
-            ((ForwardingRequest)(object)wrapper).Inner = inner;
+            // An IRequest that is not a DefaultRequest, as a caller could implement.
+            var mock = new Moq.Mock<IRequest>();
+            mock.SetupGet(r => r.SubResources).Returns(inner.SubResources);
+            mock.SetupGet(r => r.PathResources).Returns(inner.PathResources);
+            mock.SetupGet(r => r.TrailingHeaders).Returns(inner.TrailingHeaders);
+            IRequest wrapper = mock.Object;
 
             Assert.AreSame(inner.SubResources, wrapper.GetSubResourcesIfCreated());
             Assert.AreSame(inner.PathResources, wrapper.GetPathResourcesIfCreated());
@@ -243,13 +247,6 @@ namespace AWSSDK.UnitTests
         private sealed class AWS4SignerTestHook : AWS4Signer
         {
             public static List<KeyValuePair<string, string>> Parameters(IRequest request) => GetParametersToCanonicalize(request);
-        }
-
-        // An IRequest that is not a DefaultRequest, as a caller could implement.
-        public class ForwardingRequest : System.Reflection.DispatchProxy
-        {
-            public IRequest Inner { get; set; }
-            protected override object Invoke(System.Reflection.MethodInfo targetMethod, object[] args) => targetMethod.Invoke(Inner, args);
         }
     }
 }
