@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
@@ -45,7 +46,20 @@ namespace Amazon.Runtime.Internal.Transform
             XmlNodeType.Whitespace
         };
 
+        // StreamReader's default buffer size in bytes, and the smallest it uses (it raises smaller sizes to this).
+        private const int DefaultStreamReaderBufferSize = 1024;
+        private const int MinStreamReaderBufferSize = 128;
+
         private StreamReader streamReader;
+        // The stream the XML is read from. The StreamReader over it, with its 1 KB byte buffer and 2 KB char
+        // buffer, is created the first time the XML is read. Responses whose members are all in headers (S3
+        // PutObject, HeadObject, DeleteObject) and streaming responses that hand Stream to the caller (S3
+        // GetObject) never read the XML, so they never allocate it. Null once the context is disposed.
+        private Stream readerStream;
+        // The buffer size for the StreamReader created over readerStream when Content-Length is under 1 KB, or 0 for
+        // StreamReader's default. The response's Content-Encoding is checked when the StreamReader is created, so a
+        // response whose XML is never read never looks the header up.
+        private int streamReaderBufferSize;
         private XmlTextReader _xmlTextReader;
         private readonly XmlPathBuffer pathBuffer = new XmlPathBuffer();
         private string currentAttributeName;
@@ -61,7 +75,14 @@ namespace Amazon.Runtime.Internal.Transform
         {
             get
             {
-                return streamReader.BaseStream;
+                if (readerStream == null)
+                {
+                    // Disposed. streamReader is null here, so this throws the NullReferenceException that reading
+                    // BaseStream of the released reader always threw.
+                    return streamReader.BaseStream;
+                }
+
+                return readerStream;
             }
         }
 
@@ -75,14 +96,37 @@ namespace Amazon.Runtime.Internal.Transform
         {
             get
             {
-                if (_xmlTextReader == null)
-                {
-                    _xmlTextReader = new XmlTextReader(streamReader);
-                    _xmlTextReader.WhitespaceHandling = WhitespaceHandling.All;
-                    _xmlTextReader.DtdProcessing = DtdProcessing.Ignore;
-                }
-                return _xmlTextReader;
+                // Read for every XML node, so the getter stays small enough to inline and the one-time creation
+                // is in its own method.
+                return _xmlTextReader ?? CreateXmlReader();
             }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private XmlTextReader CreateXmlReader()
+        {
+            // Once disposed, readerStream is null and XmlTextReader gets the null reader, as before.
+            if (streamReader == null && readerStream != null)
+            {
+                // streamReaderBufferSize is only set when the constructor had response data, which it stored in
+                // WebResponseData. A compressed body keeps the default buffer.
+                var responseData = this.WebResponseData;
+                if (streamReaderBufferSize == 0 || responseData == null ||
+                    !string.IsNullOrEmpty(responseData.GetHeaderValue("Content-Encoding")))
+                {
+                    streamReader = new StreamReader(readerStream);
+                }
+                else
+                {
+                    // The encoding and BOM detection that StreamReader(Stream) uses, with a smaller buffer.
+                    streamReader = new StreamReader(readerStream, Encoding.UTF8, true, streamReaderBufferSize);
+                }
+            }
+
+            _xmlTextReader = new XmlTextReader(streamReader);
+            _xmlTextReader.WhitespaceHandling = WhitespaceHandling.All;
+            _xmlTextReader.DtdProcessing = DtdProcessing.Ignore;
+            return _xmlTextReader;
         }
 
         #endregion
@@ -134,6 +178,13 @@ namespace Amazon.Runtime.Internal.Transform
                 {
                     IsEmptyResponse = true;
                 }
+
+                // StreamReader's default 1 KB byte buffer comes with a 1,025-char buffer, about 3 KB in all. A body
+                // known to be smaller, and not compressed (checked in CreateXmlReader), fits in a buffer of its own size.
+                if (parsedContentLengthHeader && contentLength >= 0 && contentLength < DefaultStreamReaderBufferSize)
+                {
+                    streamReaderBufferSize = Math.Max((int)contentLength, MinStreamReaderBufferSize);
+                }
                 // Validate flexible checksums if we know the content length and the behavior was opted in to on the request
                 if (parsedContentLengthHeader && responseData.ContentLength == contentLength &&
                         string.IsNullOrEmpty(responseData.GetHeaderValue("Content-Encoding")) &&
@@ -143,7 +194,14 @@ namespace Amazon.Runtime.Internal.Transform
                 }
             }
 
-            streamReader = new StreamReader(this.FlexibleChecksumStream ?? responseStream);
+            var stream = this.FlexibleChecksumStream ?? responseStream;
+            if (stream == null || !stream.CanRead)
+            {
+                // Let StreamReader throw the same ArgumentNullException or ArgumentException it always has.
+                streamReader = new StreamReader(stream);
+            }
+
+            readerStream = stream;
 
             this.WebResponseData = responseData;
             this.MaintainResponseBody = maintainResponseBody;
@@ -415,6 +473,12 @@ namespace Amazon.Runtime.Internal.Transform
                         streamReader.Dispose();
                         streamReader = null;
                     }
+                    else if (readerStream != null)
+                    {
+                        // The StreamReader was never created. Close the stream as StreamReader.Dispose would have.
+                        readerStream.Close();
+                    }
+                    readerStream = null;
                     if (_xmlTextReader != null)
                     {
 #if NETSTANDARD
