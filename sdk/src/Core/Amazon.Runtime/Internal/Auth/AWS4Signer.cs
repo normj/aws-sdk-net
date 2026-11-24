@@ -324,13 +324,14 @@ namespace Amazon.Runtime.Internal.Auth
             }
 
             request.DeterminedSigningRegion = DetermineSigningRegion(clientConfig, clientConfig.RegionEndpointServiceName, request.AlternateEndpoint, request);
-            SetXAmzTrailerHeader(request.Headers, request.TrailingHeaders);
+            var trailingHeaders = request.GetTrailingHeadersIfCreated();
+            SetXAmzTrailerHeader(request.Headers, trailingHeaders);
 
             var parametersToCanonicalize = GetParametersToCanonicalize(request);
             var canonicalParameters = CanonicalizeQueryParameters(parametersToCanonicalize);
 
             // If the request should use a fixed x-amz-content-sha256 header value, determine the appropriate one
-            var bodySha = request.TrailingHeaders?.Count > 0
+            var bodySha = trailingHeaders?.Count > 0
                 ? StreamingBodySha256WithTrailer
                 : StreamingBodySha256;
 
@@ -344,7 +345,7 @@ namespace Amazon.Runtime.Internal.Auth
                                                              sortedHeaders,
                                                              canonicalParameters,
                                                              bodyHash,
-                                                             request.PathResources,
+                                                             request.GetPathResourcesIfCreated(),
                                                              request.UseDoubleEncoding,
                                                              out var signedHeaderNames);
             if (metrics != null)
@@ -650,7 +651,7 @@ namespace Amazon.Runtime.Internal.Auth
             // If unsigned payload, set the appropriate magic string in the header and return it
             if (request.DisablePayloadSigning != null ? request.DisablePayloadSigning.Value : !signPayload)
             {
-                if (request.TrailingHeaders?.Count > 0)
+                if (request.GetTrailingHeadersIfCreated()?.Count > 0)
                 {
                     // Set X-Amz-Decoded-Content-Length with the true size of the data
                     request.Headers[HeaderKeys.XAmzDecodedContentLengthHeader] = request.Headers[HeaderKeys.ContentLengthHeader];
@@ -1108,9 +1109,10 @@ namespace Amazon.Runtime.Internal.Auth
         {
             var parametersToCanonicalize = new List<KeyValuePair<string, string>>();
 
-            if (request.SubResources != null && request.SubResources.Count > 0)
+            var subResources = request.GetSubResourcesIfCreated();
+            if (subResources != null && subResources.Count > 0)
             {
-                foreach (var subResource in request.SubResources)
+                foreach (var subResource in subResources)
                 {
                     parametersToCanonicalize.Add(new KeyValuePair<string,string>(subResource.Key, subResource.Value));
                 }

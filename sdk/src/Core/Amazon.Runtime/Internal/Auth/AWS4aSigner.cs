@@ -221,13 +221,14 @@ namespace Amazon.Runtime.Internal.Auth
             var region = DetermineSigningRegion(clientConfig, clientConfig.RegionEndpointServiceName, request.AlternateEndpoint, request);
             request.DeterminedSigningRegion = region;
             request.Headers[HeaderKeys.XAmzRegionSetHeader] = region;
-            SetXAmzTrailerHeader(request.Headers, request.TrailingHeaders);
+            var trailingHeaders = request.GetTrailingHeadersIfCreated();
+            SetXAmzTrailerHeader(request.Headers, trailingHeaders);
 
             var parametersToCanonicalize = GetParametersToCanonicalize(request);
             var canonicalParameters = CanonicalizeQueryParameters(parametersToCanonicalize);
 
             // If the request should use a fixed x-amz-content-sha256 header value, determine the appropriate one
-            var bodySha = request.TrailingHeaders?.Count > 0
+            var bodySha = trailingHeaders?.Count > 0
                 ? V4aStreamingBodySha256WithTrailer
                 : V4aStreamingBodySha256;
 
@@ -240,7 +241,7 @@ namespace Amazon.Runtime.Internal.Auth
                                                              sortedHeaders,
                                                              canonicalParameters,
                                                              bodyHash,
-                                                             request.PathResources,
+                                                             request.GetPathResourcesIfCreated(),
                                                              request.UseDoubleEncoding,
                                                              out var signedHeaderNames);
             metrics?.AddProperty(Metric.CanonicalRequest, canonicalRequest);

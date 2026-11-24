@@ -494,7 +494,7 @@ namespace Amazon.Runtime
             {
                 if (resourcePath.StartsWith("/", StringComparison.Ordinal))
                     resourcePath = resourcePath.Substring(1);
-                resourcePath = AWSSDKUtils.ResolveResourcePathV2(resourcePath, internalRequest.PathResources);
+                resourcePath = AWSSDKUtils.ResolveResourcePathV2(resourcePath, internalRequest.GetPathResourcesIfCreated());
             }
 
             // Construct any sub resource/query parameter additions to append to the
@@ -505,9 +505,10 @@ namespace Amazon.Runtime
             var delim = "?";
             var sb = new StringBuilder();
 
-            if (internalRequest.SubResources?.Count > 0)
+            var subResources = internalRequest.GetSubResourcesIfCreated();
+            if (subResources?.Count > 0)
             {
-                foreach (var subResource in internalRequest.SubResources)
+                foreach (var subResource in subResources)
                 {
                     sb.AppendFormat("{0}{1}", delim, subResource.Key);
                     if (subResource.Value != null)
