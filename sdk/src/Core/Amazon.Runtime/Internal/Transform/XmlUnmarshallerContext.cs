@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
@@ -93,28 +94,33 @@ namespace Amazon.Runtime.Internal.Transform
         {
             get
             {
-                if (_xmlTextReader == null)
-                {
-                    // Once disposed, readerStream is null and XmlTextReader gets the null reader, as before.
-                    if (streamReader == null && readerStream != null)
-                    {
-                        if (streamReaderBufferSize == 0)
-                        {
-                            streamReader = new StreamReader(readerStream);
-                        }
-                        else
-                        {
-                            // The encoding and BOM detection that StreamReader(Stream) uses, with a smaller buffer.
-                            streamReader = new StreamReader(readerStream, Encoding.UTF8, true, streamReaderBufferSize);
-                        }
-                    }
-
-                    _xmlTextReader = new XmlTextReader(streamReader);
-                    _xmlTextReader.WhitespaceHandling = WhitespaceHandling.All;
-                    _xmlTextReader.DtdProcessing = DtdProcessing.Ignore;
-                }
-                return _xmlTextReader;
+                // Read for every XML node, so the getter stays small enough to inline and the one-time creation
+                // is in its own method.
+                return _xmlTextReader ?? CreateXmlReader();
             }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private XmlTextReader CreateXmlReader()
+        {
+            // Once disposed, readerStream is null and XmlTextReader gets the null reader, as before.
+            if (streamReader == null && readerStream != null)
+            {
+                if (streamReaderBufferSize == 0)
+                {
+                    streamReader = new StreamReader(readerStream);
+                }
+                else
+                {
+                    // The encoding and BOM detection that StreamReader(Stream) uses, with a smaller buffer.
+                    streamReader = new StreamReader(readerStream, Encoding.UTF8, true, streamReaderBufferSize);
+                }
+            }
+
+            _xmlTextReader = new XmlTextReader(streamReader);
+            _xmlTextReader.WhitespaceHandling = WhitespaceHandling.All;
+            _xmlTextReader.DtdProcessing = DtdProcessing.Ignore;
+            return _xmlTextReader;
         }
 
         #endregion
