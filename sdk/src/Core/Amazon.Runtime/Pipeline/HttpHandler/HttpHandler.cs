@@ -87,7 +87,7 @@ namespace Amazon.Runtime.Internal
 
                 using (executionContext.RequestContext.Metrics.StartEvent(Metric.HttpRequestTime))
                 using (var traceSpan = TracingUtilities.CreateSpan(executionContext.RequestContext, TelemetryConstants.HTTPRequestSpanName))
-                using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
+                using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
                 {
                     // Send request body if present.
                     if (wrappedRequest.HasRequestBody())
@@ -173,7 +173,7 @@ namespace Amazon.Runtime.Internal
             var response = executionContext.ResponseContext.HttpResponse;
 
             var metricsAttributes = new Attributes();
-            metricsAttributes.Set(TelemetryConstants.ServerAddressAttributeKey, $"{request.Endpoint.Host}:{request.Endpoint.Port.ToString()}");
+            metricsAttributes.Set(TelemetryConstants.ServerAddressAttributeKey, TelemetryNameCache.GetServerAddress(request.Endpoint.Host, request.Endpoint.Port));
 
             traceSpan.SetAttribute(TelemetryConstants.HTTPMethodAttributeKey, request.HttpMethod);
             traceSpan.SetAttribute(TelemetryConstants.HTTPStatusCodeAttributeKey, ((int)response.StatusCode));
@@ -224,7 +224,7 @@ namespace Amazon.Runtime.Internal
 
                 using (executionContext.RequestContext.Metrics.StartEvent(Metric.HttpRequestTime))
                 using (var traceSpan = TracingUtilities.CreateSpan(executionContext.RequestContext, TelemetryConstants.HTTPRequestSpanName))
-                using (MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
+                using (MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallAttemptDurationMetricName))
                 {
                     // Send request body if present.
                     if (wrappedRequest.HasRequestBody())

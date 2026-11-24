@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced per-request allocations when a telemetry provider is configured by reusing telemetry scope, operation, span and server address strings and by recording durations without allocating a measurer object."
+    ]
+  }
+}

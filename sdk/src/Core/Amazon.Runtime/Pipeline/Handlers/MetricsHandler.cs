@@ -35,8 +35,8 @@ namespace Amazon.Runtime.Internal
             if (TracingUtilities.IsNoOp(requestContext.ClientConfig))
                 return TracingUtilities.NoOpSpan;
 
-            var operationName = AWSSDKUtils.ExtractOperationName(requestContext.RequestName);
-            var spanName = $"{requestContext.ServiceMetaData.ServiceId}.{operationName}";
+            var requestName = requestContext.RequestName;
+            var spanName = TelemetryNameCache.GetCallSpanName(requestContext.ServiceMetaData.ServiceId, requestName);
             return TracingUtilities.CreateSpan(requestContext, spanName, null, SpanKind.CLIENT);
         }
 
@@ -53,11 +53,11 @@ namespace Amazon.Runtime.Internal
                 metrics.AddProperty(Metric.AsyncCall, false);
 
             var span = CreateCallSpan(executionContext.RequestContext);
-            IDisposable callDurationMetricsMeasurer = null;
+            MetricsUtilities.DurationMeasurement callDurationMetricsMeasurer = default;
 
             try
             {
-                callDurationMetricsMeasurer = MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallDurationMetricName);
+                callDurationMetricsMeasurer = MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallDurationMetricName);
                 metrics.StartEvent(Metric.ClientExecuteTime);
                 base.InvokeSync(executionContext);
 
@@ -77,7 +77,7 @@ namespace Amazon.Runtime.Internal
                 if (metrics.IsEnabled)
                     metrics.StopEvent(Metric.ClientExecuteTime);
                 this.LogMetrics(executionContext);
-                callDurationMetricsMeasurer?.Dispose();
+                callDurationMetricsMeasurer.Dispose();
                 span.Dispose();
             }
         }
@@ -98,11 +98,11 @@ namespace Amazon.Runtime.Internal
                 metrics.AddProperty(Metric.AsyncCall, true);
 
             var span = CreateCallSpan(executionContext.RequestContext);
-            IDisposable callDurationMetricsMeasurer = null;
+            MetricsUtilities.DurationMeasurement callDurationMetricsMeasurer = default;
 
             try
             {
-                callDurationMetricsMeasurer = MetricsUtilities.MeasureDuration(executionContext.RequestContext, TelemetryConstants.CallDurationMetricName);
+                callDurationMetricsMeasurer = MetricsUtilities.StartDuration(executionContext.RequestContext, TelemetryConstants.CallDurationMetricName);
                 metrics.StartEvent(Metric.ClientExecuteTime);
                 var response = await base.InvokeAsync<T>(executionContext).ConfigureAwait(false);
 
@@ -124,7 +124,7 @@ namespace Amazon.Runtime.Internal
                 if (metrics.IsEnabled)
                     metrics.StopEvent(Metric.ClientExecuteTime);
                 this.LogMetrics(executionContext);
-                callDurationMetricsMeasurer?.Dispose();
+                callDurationMetricsMeasurer.Dispose();
                 span.Dispose();
             }            
         }

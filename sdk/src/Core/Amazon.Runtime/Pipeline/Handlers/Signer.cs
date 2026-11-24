@@ -105,13 +105,13 @@ namespace Amazon.Runtime.Internal
             }
 
             using (requestContext.Metrics.StartEvent(Metric.RequestSigningTime))
-            using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.AuthSigningDurationMetricName))
+            using (MetricsUtilities.StartDuration(requestContext, TelemetryConstants.AuthSigningDurationMetricName))
             {
                 ImmutableCredentials immutableCredentials = null;
                 if (requestContext.Identity is AWSCredentials awsCredentials)
                 {
                     using (TracingUtilities.CreateSpan(requestContext, TelemetryConstants.CredentialsRetrievalSpanName))
-                    using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.ResolveIdentityDurationMetricName))
+                    using (MetricsUtilities.StartDuration(requestContext, TelemetryConstants.ResolveIdentityDurationMetricName))
                     using (requestContext.Metrics.StartEvent(Metric.CredentialsRequestTime))
                     {
                         immutableCredentials = awsCredentials.GetCredentials();
@@ -174,13 +174,13 @@ namespace Amazon.Runtime.Internal
             }
 
             using (requestContext.Metrics.StartEvent(Metric.RequestSigningTime))
-            using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.AuthSigningDurationMetricName))
+            using (MetricsUtilities.StartDuration(requestContext, TelemetryConstants.AuthSigningDurationMetricName))
             {
                 ImmutableCredentials immutableCredentials = null;
                 if (requestContext.Identity is AWSCredentials awsCredentials)
                 {
                     using (TracingUtilities.CreateSpan(requestContext, TelemetryConstants.CredentialsRetrievalSpanName))
-                    using (MetricsUtilities.MeasureDuration(requestContext, TelemetryConstants.ResolveIdentityDurationMetricName))
+                    using (MetricsUtilities.StartDuration(requestContext, TelemetryConstants.ResolveIdentityDurationMetricName))
                     using (requestContext.Metrics.StartEvent(Metric.CredentialsRequestTime))
                     {
                         immutableCredentials = await awsCredentials.GetCredentialsAsync().ConfigureAwait(false);
