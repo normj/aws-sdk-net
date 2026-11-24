@@ -594,7 +594,7 @@ namespace Amazon.Runtime.Internal
             var requestHasConfigForChunkStream = wrappedRequest.UseChunkEncoding && (wrappedRequest.AWS4SignerResult != null || wrappedRequest.AWS4aSignerResult != null);
             var hasTransferEncodingHeader = wrappedRequest.Headers.ContainsKey(HeaderKeys.TransferEncodingHeader);
             var isTransferEncodingHeaderChunked = hasTransferEncodingHeader && wrappedRequest.Headers[HeaderKeys.TransferEncodingHeader] == "chunked";
-            var hasTrailingHeaders = wrappedRequest.TrailingHeaders?.Count > 0;
+            var hasTrailingHeaders = wrappedRequest.GetTrailingHeadersIfCreated()?.Count > 0;
 
             // The goal of this logic is to wrap the request's ContentStream with:
             //   ChunkedUploadWrapperStream - if using chunked signing (with or without trailing checksums)

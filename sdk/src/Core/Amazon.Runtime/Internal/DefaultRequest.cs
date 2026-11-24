@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Threading;
 
 using Amazon.Runtime.Endpoints;
 using Amazon.Runtime.Internal.Util;
@@ -34,13 +35,18 @@ namespace Amazon.Runtime.Internal
     /// </summary>
     public class DefaultRequest : IRequest
     {
-        readonly ParameterCollection parametersCollection;
-        readonly IDictionary<string, string> parametersFacade;
+        // The parameter collection, its dictionary facade and the event stream headers are created on
+        // first access: most requests (JSON and REST bodies) never use them.
+        ParameterCollection parametersCollection;
+        IDictionary<string, string> parametersFacade;
         readonly IDictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> trailingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> subResources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        readonly IDictionary<string, string> pathResources = new Dictionary<string, string>(StringComparer.Ordinal);
-        readonly List<EventStreamHeader> eventHeaders = new List<EventStreamHeader>();
+        // Most requests never add trailing headers, sub-resources or path resources, so these are created on
+        // first access through their properties. The SDK's own hot-path readers check whether they exist first
+        // (see RequestExtensions) instead of creating an empty dictionary just to find it empty.
+        IDictionary<string, string> trailingHeaders;
+        IDictionary<string, string> subResources;
+        IDictionary<string, string> pathResources;
+        List<EventStreamHeader> eventHeaders;
 
         Uri endpoint;
         string endpointString;
@@ -74,9 +80,6 @@ namespace Amazon.Runtime.Internal
             this.requestName = this.originalRequest.GetType().Name;
             this.SignatureVersion = ((Amazon.Runtime.Internal.IAmazonWebServiceRequest)this.originalRequest).SignatureVersion;
             this.HostPrefix = string.Empty;
-
-            parametersCollection = new ParameterCollection();
-            parametersFacade = new ParametersDictionaryFacade(parametersCollection);
         }
 
         /// <inheritdoc/>
@@ -168,7 +171,7 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.eventHeaders;
+                return this.eventHeaders ?? CreateEventHeaders();
             }
         }
 
@@ -180,7 +183,7 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.parametersFacade;
+                return this.parametersFacade ?? CreateParametersFacade();
             }
         }
 
@@ -191,8 +194,28 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.parametersCollection;
+                return this.parametersCollection ?? CreateParameterCollection();
             }
+        }
+
+        // Each Create method publishes only the first instance created, so every caller sees the same one,
+        // as when they were created in the constructor.
+        private List<EventStreamHeader> CreateEventHeaders()
+        {
+            Interlocked.CompareExchange(ref this.eventHeaders, new List<EventStreamHeader>(), null);
+            return this.eventHeaders;
+        }
+
+        private ParameterCollection CreateParameterCollection()
+        {
+            Interlocked.CompareExchange(ref this.parametersCollection, new ParameterCollection(), null);
+            return this.parametersCollection;
+        }
+
+        private IDictionary<string, string> CreateParametersFacade()
+        {
+            Interlocked.CompareExchange(ref this.parametersFacade, new ParametersDictionaryFacade(this.ParameterCollection), null);
+            return this.parametersFacade;
         }
 
         /// <summary>
@@ -205,9 +228,14 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.subResources;
+                return this.subResources ?? CreateDictionary(ref this.subResources, StringComparer.OrdinalIgnoreCase);
             }
         }
+
+        /// <summary>
+        /// The <see cref="SubResources"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> SubResourcesIfCreated => System.Threading.Volatile.Read(ref this.subResources);
 
         /// <summary>
         /// Adds a new null entry to the SubResources collection for the request
@@ -279,9 +307,14 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.pathResources;
+                return this.pathResources ?? CreateDictionary(ref this.pathResources, StringComparer.Ordinal);
             }
         }
+
+        /// <summary>
+        /// The <see cref="PathResources"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> PathResourcesIfCreated => System.Threading.Volatile.Read(ref this.pathResources);
 
         /// <summary>
         /// Adds a new entry to the PathResources collection for the request
@@ -544,7 +577,21 @@ namespace Amazon.Runtime.Internal
         /// Returns a dictionary of the trailing headers included
         /// after this request's content.
         /// </summary>
-        public IDictionary<string, string> TrailingHeaders => this.trailingHeaders;
+        public IDictionary<string, string> TrailingHeaders => this.trailingHeaders ?? CreateDictionary(ref this.trailingHeaders, StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The <see cref="TrailingHeaders"/> dictionary, or null if nothing has accessed it yet.
+        /// </summary>
+        internal IDictionary<string, string> TrailingHeadersIfCreated => System.Threading.Volatile.Read(ref this.trailingHeaders);
+
+        /// <summary>
+        /// Creates the dictionary behind a lazily created property. If two threads race, both get the
+        /// instance that was published first, so every caller sees the same dictionary.
+        /// </summary>
+        private static IDictionary<string, string> CreateDictionary(ref IDictionary<string, string> field, StringComparer comparer)
+        {
+            return System.Threading.Interlocked.CompareExchange(ref field, new Dictionary<string, string>(comparer), null) ?? field;
+        }
 
         /// <summary>
         /// The selected compression algorithm to be used to compress the payload of the request.

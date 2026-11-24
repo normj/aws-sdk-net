@@ -276,6 +276,13 @@ namespace Amazon.Runtime
         protected void ProcessRequestHandlers(IExecutionContext executionContext)
         {
             var request = executionContext.RequestContext.Request;
+
+            // With no handler on the request or the client there is nobody to give the event args to, so skip
+            // building them. That also leaves the request's parameter collection uncreated when nothing uses it.
+            var originalRequest = request.OriginalRequest;
+            if ((originalRequest == null || originalRequest.mBeforeRequestEvent == null) && mBeforeRequestEvent == null)
+                return;
+
             WebServiceRequestEventArgs args = WebServiceRequestEventArgs.Create(request);
 
             if (request.OriginalRequest != null)
@@ -487,7 +494,7 @@ namespace Amazon.Runtime
             {
                 if (resourcePath.StartsWith("/", StringComparison.Ordinal))
                     resourcePath = resourcePath.Substring(1);
-                resourcePath = AWSSDKUtils.ResolveResourcePathV2(resourcePath, internalRequest.PathResources);
+                resourcePath = AWSSDKUtils.ResolveResourcePathV2(resourcePath, internalRequest.GetPathResourcesIfCreated());
             }
 
             // Construct any sub resource/query parameter additions to append to the
@@ -498,9 +505,10 @@ namespace Amazon.Runtime
             var delim = "?";
             var sb = new StringBuilder();
 
-            if (internalRequest.SubResources?.Count > 0)
+            var subResources = internalRequest.GetSubResourcesIfCreated();
+            if (subResources?.Count > 0)
             {
-                foreach (var subResource in internalRequest.SubResources)
+                foreach (var subResource in subResources)
                 {
                     sb.AppendFormat("{0}{1}", delim, subResource.Key);
                     if (subResource.Value != null)
