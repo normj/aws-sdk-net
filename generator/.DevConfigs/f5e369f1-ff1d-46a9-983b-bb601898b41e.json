@@ -1,0 +1,9 @@
+{
+  "core": {
+    "updateMinimum": false,
+    "type": "patch",
+    "changeLogMessages": [
+      "Reduced allocations and CPU time in SigV4 signing by hashing the canonical request and the string to sign without building strings for them when request metrics are disabled, and fixed the signing-key cache so that secret key, region and service combinations that are equal when joined with '/' no longer share a cached signing key."
+    ]
+  }
+}
