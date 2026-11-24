@@ -92,6 +92,58 @@ namespace AWSSDK.UnitTests.Signing
         }
 
         [TestMethod]
+        [DataRow(true)]
+        [DataRow(false)]
+        public void SignRequest_MatchesIndependentHmacOverExactStringToSign(bool metricsEnabled)
+        {
+            // Covers the combined path: the canonical request is hashed without building a string (unless
+            // metrics are on) and the string to sign is written straight to UTF-8 (unless metrics are on).
+            var config = new MockClientConfig { AuthenticationRegion = Region };
+            var request = BuildRequest("multi-byte \u00e9\u20ac\U0001F600 value");
+            var metrics = new RequestMetrics { IsEnabled = metricsEnabled };
+            var result = new AWS4Signer().SignRequest(request, config, metrics, AccessKey, SecretKey, SignedAt);
+
+            var sortedHeaders = AWS4Signer.SortAndPruneHeaders(request.Headers);
+            var canonicalRequest = AWS4Signer.CanonicalizeRequest(request.Endpoint, request.ResourcePath, request.HttpMethod,
+                sortedHeaders, "Action=ListUsers&Version=2010-05-08", request.Headers[HeaderKeys.XAmzContentSha256Header],
+                request.PathResources, request.UseDoubleEncoding);
+            string expectedStringToSign;
+            using (var sha256 = SHA256.Create())
+            {
+                expectedStringToSign = "AWS4-HMAC-SHA256\n20150830T123600Z\n20150830/" + Region + "/" + Service + "/aws4_request\n" +
+                    AWSSDKUtils.ToHex(sha256.ComputeHash(Encoding.UTF8.GetBytes(canonicalRequest)), true);
+            }
+            using (var hmac = new HMACSHA256(AWS4Signer.ComposeSigningKey(SecretKey, Region, "20150830", Service)))
+            {
+                Assert.AreEqual(AWSSDKUtils.ToHex(hmac.ComputeHash(Encoding.UTF8.GetBytes(expectedStringToSign)), true), result.Signature);
+            }
+
+            if (metricsEnabled)
+            {
+                Assert.AreEqual(canonicalRequest, (string)metrics.Properties[Metric.CanonicalRequest].Single());
+                Assert.AreEqual(expectedStringToSign, metrics.Properties[Metric.StringToSign].Single().ToString());
+            }
+            else
+            {
+                Assert.AreEqual(0, metrics.Properties.Count);
+            }
+        }
+
+        [TestMethod]
+        public void ComputeSignatureFromHash_NonAsciiHashArgument_MatchesIndependentHmac()
+        {
+            // ComputeSignatureFromHash takes the hash from its caller, so the UTF-8 buffer must be sized for any input.
+            var hash = new string('\u20ac', 200); // 600 UTF-8 bytes: more than the 512-byte stack buffer
+            var result = AWS4Signer.ComputeSignatureFromHash(AccessKey, SecretKey, Region, SignedAt, Service, "host", hash, null);
+
+            var stringToSign = "AWS4-HMAC-SHA256\n20150830T123600Z\n20150830/" + Region + "/" + Service + "/aws4_request\n" + hash;
+            using (var hmac = new HMACSHA256(AWS4Signer.ComposeSigningKey(SecretKey, Region, "20150830", Service)))
+            {
+                Assert.AreEqual(AWSSDKUtils.ToHex(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)), true), result.Signature);
+            }
+        }
+
+        [TestMethod]
         public void ComputeHash_NullString_Throws()
         {
             Assert.ThrowsExactly<ArgumentNullException>(() => AWS4Signer.ComputeHash((string)null));
