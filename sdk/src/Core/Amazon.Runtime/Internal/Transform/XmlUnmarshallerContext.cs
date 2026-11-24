@@ -56,8 +56,11 @@ namespace Amazon.Runtime.Internal.Transform
         // PutObject, HeadObject, DeleteObject) and streaming responses that hand Stream to the caller (S3
         // GetObject) never read the XML, so they never allocate it. Null once the context is disposed.
         private Stream readerStream;
-        // The buffer size for the StreamReader created over readerStream, or 0 for StreamReader's default.
+        // The buffer size for the StreamReader created over readerStream, or 0 for StreamReader's default. Set when
+        // Content-Length is under 1 KB; sizingResponseData is then the response whose Content-Encoding is checked
+        // when the StreamReader is created, so a response whose XML is never read never looks the header up.
         private int streamReaderBufferSize;
+        private IWebResponseData sizingResponseData;
         private XmlTextReader _xmlTextReader;
         private readonly XmlPathBuffer pathBuffer = new XmlPathBuffer();
         private string currentAttributeName;
@@ -106,7 +109,8 @@ namespace Amazon.Runtime.Internal.Transform
             // Once disposed, readerStream is null and XmlTextReader gets the null reader, as before.
             if (streamReader == null && readerStream != null)
             {
-                if (streamReaderBufferSize == 0)
+                if (streamReaderBufferSize == 0 ||
+                    !string.IsNullOrEmpty(sizingResponseData.GetHeaderValue("Content-Encoding")))
                 {
                     streamReader = new StreamReader(readerStream);
                 }
@@ -174,11 +178,11 @@ namespace Amazon.Runtime.Internal.Transform
                 }
 
                 // StreamReader's default 1 KB byte buffer comes with a 1,025-char buffer, about 3 KB in all. A body
-                // known to be smaller, and not compressed, fits in a buffer of its own size.
-                if (parsedContentLengthHeader && contentLength >= 0 && contentLength < DefaultStreamReaderBufferSize &&
-                    string.IsNullOrEmpty(responseData.GetHeaderValue("Content-Encoding")))
+                // known to be smaller, and not compressed (checked in CreateXmlReader), fits in a buffer of its own size.
+                if (parsedContentLengthHeader && contentLength >= 0 && contentLength < DefaultStreamReaderBufferSize)
                 {
                     streamReaderBufferSize = Math.Max((int)contentLength, MinStreamReaderBufferSize);
+                    sizingResponseData = responseData;
                 }
                 // Validate flexible checksums if we know the content length and the behavior was opted in to on the request
                 if (parsedContentLengthHeader && responseData.ContentLength == contentLength &&
