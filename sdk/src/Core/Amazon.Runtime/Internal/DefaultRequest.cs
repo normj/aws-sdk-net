@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Threading;
 
 using Amazon.Runtime.Endpoints;
 using Amazon.Runtime.Internal.Util;
@@ -34,13 +35,15 @@ namespace Amazon.Runtime.Internal
     /// </summary>
     public class DefaultRequest : IRequest
     {
-        readonly ParameterCollection parametersCollection;
-        readonly IDictionary<string, string> parametersFacade;
+        // The parameter collection, its dictionary facade and the event stream headers are created on
+        // first access: most requests (JSON and REST bodies) never use them.
+        ParameterCollection parametersCollection;
+        IDictionary<string, string> parametersFacade;
         readonly IDictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> trailingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> subResources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly IDictionary<string, string> pathResources = new Dictionary<string, string>(StringComparer.Ordinal);
-        readonly List<EventStreamHeader> eventHeaders = new List<EventStreamHeader>();
+        List<EventStreamHeader> eventHeaders;
 
         Uri endpoint;
         string endpointString;
@@ -74,9 +77,6 @@ namespace Amazon.Runtime.Internal
             this.requestName = this.originalRequest.GetType().Name;
             this.SignatureVersion = ((Amazon.Runtime.Internal.IAmazonWebServiceRequest)this.originalRequest).SignatureVersion;
             this.HostPrefix = string.Empty;
-
-            parametersCollection = new ParameterCollection();
-            parametersFacade = new ParametersDictionaryFacade(parametersCollection);
         }
 
         /// <inheritdoc/>
@@ -168,7 +168,7 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.eventHeaders;
+                return this.eventHeaders ?? CreateEventHeaders();
             }
         }
 
@@ -180,7 +180,7 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.parametersFacade;
+                return this.parametersFacade ?? CreateParametersFacade();
             }
         }
 
@@ -191,8 +191,28 @@ namespace Amazon.Runtime.Internal
         {
             get
             {
-                return this.parametersCollection;
+                return this.parametersCollection ?? CreateParameterCollection();
             }
+        }
+
+        // Each Create method publishes only the first instance created, so every caller sees the same one,
+        // as when they were created in the constructor.
+        private List<EventStreamHeader> CreateEventHeaders()
+        {
+            Interlocked.CompareExchange(ref this.eventHeaders, new List<EventStreamHeader>(), null);
+            return this.eventHeaders;
+        }
+
+        private ParameterCollection CreateParameterCollection()
+        {
+            Interlocked.CompareExchange(ref this.parametersCollection, new ParameterCollection(), null);
+            return this.parametersCollection;
+        }
+
+        private IDictionary<string, string> CreateParametersFacade()
+        {
+            Interlocked.CompareExchange(ref this.parametersFacade, new ParametersDictionaryFacade(this.ParameterCollection), null);
+            return this.parametersFacade;
         }
 
         /// <summary>

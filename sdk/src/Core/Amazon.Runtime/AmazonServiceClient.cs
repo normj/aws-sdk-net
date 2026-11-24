@@ -276,6 +276,13 @@ namespace Amazon.Runtime
         protected void ProcessRequestHandlers(IExecutionContext executionContext)
         {
             var request = executionContext.RequestContext.Request;
+
+            // With no handler on the request or the client there is nobody to give the event args to, so skip
+            // building them. That also leaves the request's parameter collection uncreated when nothing uses it.
+            var originalRequest = request.OriginalRequest;
+            if ((originalRequest == null || originalRequest.mBeforeRequestEvent == null) && mBeforeRequestEvent == null)
+                return;
+
             WebServiceRequestEventArgs args = WebServiceRequestEventArgs.Create(request);
 
             if (request.OriginalRequest != null)
